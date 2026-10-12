@@ -78,3 +78,21 @@
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Slim, dark scrollbar for the sidebar navigation */
+.sidebar-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(255 255 255 / 0.15) transparent;
+}
+.sidebar-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+.sidebar-scroll::-webkit-scrollbar-thumb {
+  background: rgb(255 255 255 / 0.15);
+  border-radius: 9999px;
+}
+
+/* Focus rings on the dark sidebar should offset against the sidebar, not white */
+aside.bg-slate-900 *:focus-visible {
+  --tw-ring-offset-color: rgb(15 23 42);
+}
