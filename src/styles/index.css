@@ -1,0 +1,80 @@
+@import '@fontsource-variable/inter';
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Design tokens (RGB triplets so Tailwind opacity works). Add a [data-theme='dark'] block later. */
+:root {
+  --page: 248 250 252;
+  --surface: 255 255 255;
+  --subtle: 241 245 249;
+  --line: 226 232 240;
+  --ink: 15 23 42;
+  --muted: 71 85 105;
+  --faint: 100 116 139;
+  --accent: 79 70 229;
+  --accent-hover: 67 56 202;
+  --accent-soft: 238 242 255;
+  --cell-py: 10px;
+  --control-h: 36px;
+}
+[data-density='compact'] {
+  --cell-py: 5px;
+  --control-h: 30px;
+}
+
+@layer base {
+  html {
+    font-family: 'Inter Variable', Inter, system-ui, sans-serif;
+    font-feature-settings: 'cv11', 'ss01';
+  }
+  body {
+    @apply bg-page text-ink text-base antialiased;
+    font-variant-numeric: tabular-nums;
+  }
+  *:focus-visible {
+    @apply outline-none ring-2 ring-accent ring-offset-2 ring-offset-surface;
+  }
+  ::selection {
+    background: rgb(var(--accent) / 0.2);
+  }
+}
+
+@layer components {
+  .card {
+    @apply rounded-lg border border-line bg-surface;
+  }
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-md border px-3 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50;
+    height: var(--control-h);
+  }
+  .btn-primary {
+    @apply btn border-accent bg-accent text-white hover:bg-accent-hover;
+  }
+  .btn-secondary {
+    @apply btn border-line bg-surface text-ink hover:bg-subtle;
+  }
+  .btn-ghost {
+    @apply btn border-transparent bg-transparent text-muted hover:bg-subtle hover:text-ink;
+  }
+  .btn-danger {
+    @apply btn border-red-600 bg-red-600 text-white hover:bg-red-700;
+  }
+  .input {
+    @apply w-full rounded-md border border-line bg-surface px-3 text-base text-ink placeholder:text-faint;
+    height: var(--control-h);
+  }
+  .label {
+    @apply mb-1 block text-xs font-medium text-muted;
+  }
+  .kbd {
+    @apply rounded border border-line bg-subtle px-1.5 py-0.5 text-[11px] font-medium text-muted;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
