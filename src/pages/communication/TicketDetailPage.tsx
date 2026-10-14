@@ -18,7 +18,7 @@ import type { Ticket } from '@/shared/types'
 import { useDataStore } from '@/mock/store'
 import { useCommStore } from '@/mock/stores/communication'
 import { addTicketNote, listTickets, mergeTickets, replyToTicket, updateTicket } from '@/mock/api/helpdesk'
-import { CANNED_REPLIES } from '@/mock/data/communication'
+import { CANNED_REPLIES, sourceLabel } from '@/mock/data/communication'
 import { JOURNAL_CODES } from '@/mock/data/core'
 import { useNow } from './hooks'
 import { PaperLink } from './parts'
@@ -28,6 +28,7 @@ export function TicketDetailPage() {
   const { ticketId = '' } = useParams()
   const { can, why } = usePermission('helpdesk')
   const canWork = can('work')
+  const canOpenPaper = usePermission('submissions').can('view')
   const { loading, error, reload } = useAsync(() => listTickets(JOURNAL_CODES), [ticketId])
   const tickets = useDataStore((s) => s.tickets)
   const users = useDataStore((s) => s.users)
@@ -170,9 +171,9 @@ export function TicketDetailPage() {
             <DescriptionList cols={1} items={[
               { label: 'Journal', value: <JournalBadge code={ticket.journal} /> },
               { label: 'Requester', value: <>{ticket.requester}<br /><span className="text-muted">{ticket.detail.requesterEmail}</span></> },
-              { label: 'Paper', value: <PaperLink id={ticket.detail.paperId} /> },
+              { label: 'Paper', value: <PaperLink id={ticket.detail.paperId} plain={!canOpenPaper} /> },
               { label: 'Category', value: ticket.detail.category },
-              { label: 'Source', value: ticket.detail.source },
+              { label: 'Source', value: sourceLabel(ticket.detail.source) },
               { label: 'Assignee', value: assignee?.name ?? 'Unassigned' },
               { label: 'Opened', value: formatDateTime(ticket.createdAt) },
               { label: 'First response', value: ticket.detail.firstResponseAt ? formatDateTime(ticket.detail.firstResponseAt) : 'Not yet' },
