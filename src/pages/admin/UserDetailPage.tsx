@@ -14,9 +14,9 @@ import { RelativeTime } from '@/components/Time'
 import { Timeline } from '@/components/Timeline'
 import { toast } from '@/components/Toasts'
 import { formatDateTime } from '@/shared/formatters'
-import { changeUserStatus, getUser, resendInvitation, resetUserAccess, updateAssignments, type StatusAction } from '@/mock/api/users'
+import { changeUserStatus, getUser, hasExpertiseRole, resendInvitation, resetUserAccess, updateAssignments, updateExpertise, type StatusAction } from '@/mock/api/users'
 import { categoryLabel } from '@/mock/api/audit'
-import { RoleChips, RoleMatrix, CopyField, UserStatusBadge, type Assignments } from './userUi'
+import { ExpertiseChips, ExpertisePicker, RoleChips, RoleMatrix, CopyField, UserStatusBadge, type Assignments } from './userUi'
 
 const messageOf = (e: unknown) => (e instanceof Error ? e.message : 'Something went wrong. Try again.')
 
@@ -26,6 +26,7 @@ export function UserDetailPage() {
   const me = useCurrentUser()
   const { data, loading, error, reload } = useAsync(() => getUser(userId), [userId])
   const [editing, setEditing] = useState(false)
+  const [editingExp, setEditingExp] = useState(false)
   const [confirm, setConfirm] = useState<StatusAction | 'reset' | null>(null)
   const [link, setLink] = useState<{ title: string; text: string; url: string } | null>(null)
 
@@ -33,7 +34,7 @@ export function UserDetailPage() {
   if (error) {
     return (
       <>
-        <PageHeader title="User" crumbs={[{ label: userId }]} actions={back} />
+        <PageHeader title="User Management" crumbs={[{ label: userId }]} actions={back} />
         <div className="card"><ErrorState message={error.message} onRetry={reload} /></div>
       </>
     )
@@ -83,6 +84,15 @@ export function UserDetailPage() {
               <p className="mt-3 text-xs text-muted">The person only sees the journals listed here, and only the modules their role allows in each one.</p>
             </SectionCard>
 
+            {hasExpertiseRole(u.assignments) && (
+              <SectionCard title="Reviewer expertise areas" action={
+                <GuardedButton allowed={manage} why={perm.why('manage')} onClick={() => setEditingExp(true)}><Pencil size={14} strokeWidth={1.5} aria-hidden /> Edit expertise</GuardedButton>
+              }>
+                <ExpertiseChips tags={u.expertise} />
+                <p className="mt-3 text-xs text-muted">Editors see these when matching a paper’s subjects to a Reviewer or Review Panel Member.</p>
+              </SectionCard>
+            )}
+
             <SectionCard title="Activity">
               <Timeline
                 empty="No recorded activity for this user yet."
@@ -131,6 +141,10 @@ export function UserDetailPage() {
         try { await updateAssignments(u.id, a); toast.success(`Roles updated for ${u.name}.`); setEditing(false); reload() } catch (e) { toast.error(messageOf(e)) }
       }} />}
 
+      {u && editingExp && <EditExpertise key={u.id} initial={u.expertise} name={u.name} onClose={() => setEditingExp(false)} onSave={async (t) => {
+        try { await updateExpertise(u.id, t); toast.success(`Expertise updated for ${u.name}.`); setEditingExp(false); reload() } catch (e) { toast.error(messageOf(e)) }
+      }} />}
+
       <ConfirmDialog open={confirm === 'suspend'} onClose={() => setConfirm(null)} onConfirm={() => runStatus('suspend')} title={`Suspend ${u?.name}?`} confirmLabel="Suspend" danger
         consequences={['Block sign-in immediately and end any open session.', 'Keep their roles, so reactivating restores the same access.', 'Leave papers and reviews assigned to them in place — reassign them if needed.', 'Be recorded in the audit log.']} />
       <ConfirmDialog open={confirm === 'reactivate'} onClose={() => setConfirm(null)} onConfirm={() => runStatus('reactivate')} title={`Reactivate ${u?.name}?`} confirmLabel="Reactivate"
@@ -160,6 +174,21 @@ function EditAssignments({ initial, name, onClose, onSave }: { initial: Assignme
       </>}>
       <RoleMatrix value={value} onChange={setValue} />
       <p className="mt-2 text-xs text-muted">Choose “No access” to remove someone from a journal. At least one journal must remain; the last Super Admin cannot be demoted.</p>
+    </Dialog>
+  )
+}
+
+function EditExpertise({ initial, name, onClose, onSave }: { initial: string[]; name: string; onClose: () => void; onSave: (t: string[]) => Promise<void> }) {
+  const [value, setValue] = useState<string[]>(initial)
+  const [saving, setSaving] = useState(false)
+  const changed = JSON.stringify([...value].sort()) !== JSON.stringify([...initial].sort())
+  return (
+    <Dialog open onClose={onClose} title={`Expertise areas — ${name}`} description="Choose the subjects this person can review."
+      footer={<>
+        <button className="btn-secondary" onClick={onClose}>Cancel</button>
+        <button className="btn-primary" disabled={!changed || saving} onClick={async () => { setSaving(true); await onSave(value); setSaving(false) }}>{saving ? 'Saving…' : 'Save expertise'}</button>
+      </>}>
+      <ExpertisePicker value={value} onChange={setValue} />
     </Dialog>
   )
 }

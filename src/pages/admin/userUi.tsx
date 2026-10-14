@@ -1,10 +1,11 @@
 import { useState } from 'react'
-import { Check, Copy } from 'lucide-react'
+import { Check, Copy, Search } from 'lucide-react'
 import { Badge, JournalBadge } from '@/components/Badges'
 import { toast } from '@/components/Toasts'
 import { useSession } from '@/mock/store'
 import { JOURNAL_CODES } from '@/mock/data/core'
-import { ROLE_FLAG } from '@/permissions/features'
+import { FLAG_META, ROLE_FLAG } from '@/permissions/flags'
+import { SUBJECT_VOCAB } from '@/mock/data/settings'
 import { ROLE_META, ROLE_ORDER } from '@/permissions/roles'
 import type { JournalCode, Role, UserStatus } from '@/shared/types'
 import type { Tone } from '@/shared/statuses'
@@ -97,7 +98,7 @@ export function RoleMatrix({ value, onChange, disabled }: { value: Assignments; 
             {ROLE_ORDER.map((r) => (
               <th key={r} scope="col" className="px-2 py-2 text-center font-medium" title={roleOff(r) ? `${ROLE_META[r].label} is switched off in Prototype controls (feature flag).` : ROLE_META[r].description}>
                 {ROLE_META[r].short}
-                {roleOff(r) && <span className="block text-[10px] font-normal text-amber-700">flag off</span>}
+                {ROLE_FLAG[r] && <span className="mt-0.5 block text-[10px] font-normal text-amber-700">{roleOff(r) ? 'Switched off' : FLAG_META[ROLE_FLAG[r]!].badge}</span>}
               </th>
             ))}
           </tr>
@@ -122,6 +123,46 @@ export function RoleMatrix({ value, onChange, disabled }: { value: Assignments; 
           ))}
         </tbody>
       </table>
+    </div>
+  )
+}
+
+/** Compact subject chips for a Reviewer / Review Panel Member. */
+export function ExpertiseChips({ tags, max }: { tags: string[]; max?: number }) {
+  if (tags.length === 0) return <span className="text-xs text-muted">No expertise areas set</span>
+  const shown = max ? tags.slice(0, max) : tags
+  return (
+    <ul className="flex flex-wrap gap-1" aria-label="Expertise areas">
+      {shown.map((t) => <li key={t} className="rounded-full bg-accent-soft px-2 py-0.5 text-[11px] font-medium text-accent">{t}</li>)}
+      {max && tags.length > max && <li className="rounded-full bg-subtle px-2 py-0.5 text-[11px] text-muted" title={tags.slice(max).join(', ')}>+{tags.length - max}</li>}
+    </ul>
+  )
+}
+
+/** Multi-select of subject tags; the vocabulary matches the one editorial reviewer matching uses. */
+export function ExpertisePicker({ value, onChange }: { value: string[]; onChange: (next: string[]) => void }) {
+  const [q, setQ] = useState('')
+  const options = SUBJECT_VOCAB.filter((s) => s.toLowerCase().includes(q.trim().toLowerCase()))
+  const toggle = (s: string) => onChange(value.includes(s) ? value.filter((x) => x !== s) : [...value, s])
+  return (
+    <div>
+      <div className="relative mb-2">
+        <Search size={14} strokeWidth={1.5} aria-hidden className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-faint" />
+        <input type="search" className="input !pl-8" placeholder="Search subjects" aria-label="Search subjects" value={q} onChange={(e) => setQ(e.target.value)} />
+      </div>
+      <div role="group" aria-label="Expertise areas" className="flex max-h-48 flex-wrap gap-1.5 overflow-auto">
+        {options.map((s) => {
+          const on = value.includes(s)
+          return (
+            <button key={s} type="button" aria-pressed={on} onClick={() => toggle(s)}
+              className={`rounded-full border px-2.5 py-1 text-xs ${on ? 'border-accent bg-accent-soft font-medium text-accent' : 'border-line text-muted hover:bg-subtle'}`}>
+              {on && <Check size={11} aria-hidden className="mr-1 inline" />}{s}
+            </button>
+          )
+        })}
+        {options.length === 0 && <p className="text-xs text-muted">No subject matches “{q}”.</p>}
+      </div>
+      <p className="mt-2 text-xs text-muted">{value.length} selected. Used to suggest this person for papers in matching subjects.</p>
     </div>
   )
 }

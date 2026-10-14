@@ -25,6 +25,84 @@ export interface JournalSettings {
   supportEnd: string
   /** Indexing badges shown in the website footer / journal header, by service id. */
   indexing: Record<string, boolean>
+  /** Everything the journal website shows that is not a fee or an ID: contact, subjects, trust and call for papers. */
+  site: SiteSettings
+}
+
+export interface LabelValue { label: string; value: string }
+export interface SiteSettings {
+  infoTable: LabelValue[]
+  publisher: string
+  emails: LabelValue[]
+  phones: LabelValue[]
+  address: string
+  mapLink: string
+  social: { linkedin: string; x: string; facebook: string; youtube: string; instagram: string }
+  subjects: { name: string; branches: string[] }[]
+  articleTypes: string[]
+  trustBadges: string[]
+  trustLedger: { title: string; detail: string; date: string }[]
+  callForPapers: { enabled: boolean; text: string; deadline: string }
+}
+
+const SUBJECTS: Record<JournalCode, { name: string; branches: string[] }[]> = {
+  IJMAT: [
+    { name: 'Smart materials', branches: ['Shape-memory alloys', 'Composites', 'Nanomaterials'] },
+    { name: 'Manufacturing', branches: ['Additive manufacturing', 'Lean production'] },
+    { name: 'Technology-enabled learning', branches: ['Blended learning', 'Learning analytics'] },
+  ],
+  JIMRT: [
+    { name: 'Management', branches: ['Operations', 'Organisational behaviour', 'Strategy'] },
+    { name: 'Technology and society', branches: ['Digital governance', 'Public policy'] },
+  ],
+  IJCSD: [
+    { name: 'Machine learning', branches: ['Federated learning', 'Computer vision', 'NLP'] },
+    { name: 'Software engineering', branches: ['DevOps', 'Testing'] },
+    { name: 'Distributed systems', branches: ['Edge computing', 'Cloud-native'] },
+  ],
+  IJECM: [
+    { name: 'Structures', branches: ['Civil structures', 'Earthquake engineering'] },
+    { name: 'Energy systems', branches: ['Battery packs', 'Thermal management'] },
+    { name: 'Embedded design', branches: ['IoT devices', 'Control systems'] },
+  ],
+  IJFRD: [
+    { name: 'Banking', branches: ['Credit risk', 'Digital payments'] },
+    { name: 'Capital markets', branches: ['Asset pricing', 'Market microstructure'] },
+    { name: 'Household finance', branches: ['Savings behaviour', 'UPI adoption'] },
+  ],
+}
+
+function buildSite(code: JournalCode, i: number): SiteSettings {
+  const host = code.toLowerCase()
+  return {
+    infoTable: [
+      { label: 'Frequency', value: 'Quarterly (January, April, July, October)' },
+      { label: 'Peer review', value: 'Double-blind' },
+      { label: 'Access', value: 'Open access (CC BY 4.0)' },
+      { label: 'Average time to first decision', value: '21 days' },
+      { label: 'Language', value: 'English' },
+    ],
+    publisher: 'Edtech Publishers',
+    emails: [
+      { label: 'Editorial office', value: `editorial@${host}.example.org` },
+      { label: 'Payments', value: `accounts@${host}.example.org` },
+    ],
+    phones: [{ label: 'Phone and WhatsApp', value: '+91 20 4000 1100' }],
+    address: 'Edtech Publishers, Plot 14, Knowledge Park, Pune 411057, India',
+    mapLink: 'https://maps.google.com/?q=Knowledge+Park+Pune',
+    social: {
+      linkedin: `https://www.linkedin.com/company/${host}`, x: `https://x.com/${host}`,
+      facebook: i % 2 === 0 ? `https://facebook.com/${host}` : '', youtube: '', instagram: '',
+    },
+    subjects: SUBJECTS[code].map((s) => ({ name: s.name, branches: [...s.branches] })),
+    articleTypes: ['Research article', 'Review article', 'Case study', 'Short communication'],
+    trustBadges: ['Peer reviewed', 'Open access', 'COPE guidelines', 'Plagiarism checked'],
+    trustLedger: [
+      { title: 'Crossref DOI registered', detail: 'All published articles receive a permanent DOI.', date: '2025-03-12' },
+      { title: 'Similarity checks on every submission', detail: 'Screening includes a text-overlap report.', date: '2025-06-01' },
+    ],
+    callForPapers: { enabled: i !== 3, text: `${code} is accepting original research, review articles and case studies for the next issue. All submissions are double-blind peer reviewed.`, deadline: '2026-12-20' },
+  }
 }
 
 export const INDEXING_SERVICES: { id: string; label: string; description: string }[] = [
@@ -85,6 +163,7 @@ export function buildJournalSettings(): Record<JournalCode, JournalSettings> {
       ],
       supportStart: '10:00',
       supportEnd: '18:00',
+      site: buildSite(j.code, i),
       indexing: { scholar: true, crossref: true, doaj: i % 2 === 0, scopus: false, wos: false, ugc: i === 2 || i === 4, base: true, openaire: i < 3 },
     }
   })
@@ -135,7 +214,7 @@ const SEED_ENTRIES: Seed[] = [
   ['Priya Menon', 'IJMAT', 'APC updated', 'IJMAT settings', 'APC (INR): 2,800\nAPC (USD): 45', 'APC (INR): 2,950\nAPC (USD): 49'],
   ['Rohan Mehta', 'IJMAT', 'Paper accepted', P('IJMAT', 3), 'decision_pending', 'accepted'],
   ['Neha Kapoor', 'JIMRT', 'Status changed to in_production', P('JIMRT', 4), 'paid', 'in_production'],
-  ['Priya Menon', 'ALL', 'User invited', 'Karan Shah', undefined, 'IJMAT: Journal Editor\nJIMRT: Associate Editor'],
+  ['Priya Menon', 'ALL', 'User invited', 'Karan Shah', undefined, 'IJMAT: Editor\nJIMRT: Associate Editor'],
   ['Isha Desai', 'IJMAT', 'Payment verified', 'PAY-IJMAT-0212', 'pending_verification', 'verified'],
   ['Rohan Mehta', 'IJCSD', 'Paper rejected', P('IJCSD', 2), 'decision_pending', 'rejected'],
   ['Priya Menon', 'JIMRT', 'Journal settings updated: ISSN', 'JIMRT settings', 'ISSN: 2584-1020', 'ISSN: 2584-1002'],
@@ -162,7 +241,7 @@ const SEED_ENTRIES: Seed[] = [
   ['Isha Desai', 'JIMRT', 'Announcement published', 'Call for papers — Vol 3 Issue 4', 'draft', 'published'],
   ['Priya Menon', 'IJMAT', 'Journal settings updated: WhatsApp number', 'IJMAT settings', 'WhatsApp: +91 98250 10099', 'WhatsApp: +91 98250 10001'],
   ['Rohan Mehta', 'IJMAT', 'Paper rejected', P('IJMAT', 11), 'decision_pending', 'rejected'],
-  ['Priya Menon', 'ALL', 'User invited', 'Isha Desai', undefined, 'IJMAT: Support Staff\nJIMRT: Support Staff'],
+  ['Priya Menon', 'ALL', 'User invited', 'Isha Desai', undefined, 'IJMAT: Support Executive\nJIMRT: Support Executive'],
   ['Neha Kapoor', 'JIMRT', 'Status changed to published', P('JIMRT', 9), 'ready_for_approval', 'published'],
   ['Isha Desai', 'IJCSD', 'Payment verified', 'PAY-IJCSD-0101', 'pending_verification', 'verified'],
   ['Priya Menon', 'IJFRD', 'Journal settings updated: APC', 'IJFRD settings', 'APC (INR): 3,500\nAPC (USD): 59', 'APC (INR): 3,800\nAPC (USD): 65'],
@@ -213,3 +292,13 @@ export function buildAuditHistory(): AuditEntry[] {
     }
   })
 }
+
+/** Subject / expertise vocabulary shared with editorial reviewer matching (mirrors the subjects used in data/editorial.ts). */
+export const SUBJECT_VOCAB: string[] = [
+  'Accounting', 'Agriculture', 'Automation', 'Banking', 'Capital markets', 'Civil engineering', 'Climate & development', 'Consumer behaviour',
+  'Digital commerce', 'Distributed systems', 'Econometrics', 'Education technology', 'Electronics', 'Energy systems', 'Engineering education',
+  'Entrepreneurship', 'Environmental engineering', 'Financial inclusion', 'Higher education', 'Human resources', 'Innovation management',
+  'Machine learning', 'Manufacturing', 'Marketing', 'Materials science', 'Mechanical design', 'Natural language processing',
+  'Organisational behaviour', 'Public health', 'Public policy', 'Regional development', 'Security & fraud', 'Signal processing',
+  'Software engineering', 'Supply chain', 'Sustainability',
+]

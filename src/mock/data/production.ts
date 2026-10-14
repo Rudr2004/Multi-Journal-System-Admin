@@ -1,4 +1,5 @@
 import type { Author, JournalCode, Paper } from '@/shared/types'
+import { journalByCode } from './core'
 
 /* ------------------------------------------------------------------ */
 /* Types                                                                */
@@ -76,7 +77,7 @@ export interface ProductionRecord {
   articleVersion: number
 }
 
-export type BackdatedStatus = 'pending_approval' | 'published'
+export type BackdatedStatus = 'in_production' | 'pending_approval' | 'published'
 
 export interface BackdatedItem {
   id: string
@@ -94,6 +95,8 @@ export interface BackdatedItem {
   createdBy: string
   note: string
   status: BackdatedStatus
+  /** No Associate Editor is assigned to the journal, so production is unassigned. */
+  unassigned?: boolean
 }
 
 export type ChangeType = 'correction' | 'author_name' | 'affiliation' | 'file_replacement' | 'erratum' | 'retraction' | 'withdrawal'
@@ -108,7 +111,26 @@ export const CHANGE_TYPE_META: Record<ChangeType, { label: string; hint: string;
   withdrawal: { label: 'Withdrawal', hint: 'Remove the article at the authors’ request before it is cited or indexed.', editsArticle: false },
 }
 
-export type ChangeStatus = 'requested' | 'approved' | 'rejected' | 'revision' | 'version_review' | 'completed'
+/**
+ * requested -> under_review -> approved (fee pending) -> ready (Ready for correction) -> version_review -> completed,
+ * or rejected. 'revision' means the Editor asked for changes to the submitted version.
+ */
+export type ChangeStatus = 'requested' | 'under_review' | 'approved' | 'ready' | 'revision' | 'version_review' | 'completed' | 'rejected'
+
+export type FeeState = 'pending' | 'paid' | 'waived'
+
+export interface ChangeFee {
+  state: FeeState
+  currency: 'INR' | 'USD'
+  base: number
+  gst: number
+  gstNote: string
+  total: number
+  link?: string
+  sentAt?: string
+  paidAt?: string
+  waivedReason?: string
+}
 
 export type ChangeApply =
   | { kind: 'author'; index: number; prop: 'name' | 'affiliation' }
@@ -168,6 +190,10 @@ export interface ChangeRequest {
   versions: ArticleVersion[]
   result?: ChangeResult
   events: ChangeEvent[]
+  /** Correction fee, set by the Editor when the correctionFee flag is on. */
+  fee?: ChangeFee
+  /** Mock attachment supplied by the requester. */
+  attachmentName?: string
 }
 
 /* ------------------------------------------------------------------ */
@@ -451,65 +477,162 @@ const eventsFor = (items: [number, string, string, string?][]): ChangeEvent[] =>
 
 /** Seeds a handful of change requests against real published papers. */
 export function seedChangeRequests(papers: Paper[], authorsOf: (p: Paper) => Author[]): ChangeRequest[] {
-  const pub = (j: JournalCode, skip = 0) => papers.filter((p) => p.journal === j && ['published', 'indexed'].includes(p.status))[skip]
+  const live = (j: JournalCode) => papers.filter((p) => p.journal === j && ['published', 'indexed'].includes(p.status))
   const out: ChangeRequest[] = []
-  const add = (r: ChangeRequest | undefined) => { if (r) out.push(r) }
+  let n = 0
+  const nextId = () => `PPC-${String(++n).padStart(4, '0')}`
+  const ev = eventsFor
+  const gstInr = (base: number) => ({ gst: Math.round(base * 0.18 * 100) / 100, gstNote: 'IGST 18%', total: Math.round(base * 1.18 * 100) / 100 })
+  const linkFor = (j: JournalCode, id: string) => `https://pay.${journalByCode(j).domain}/corrections/${id}`
+  const nameTarget = (a: Author) => {
+    const parts = a.name.split(' ')
+    return { key: 'author-0-name', label: 'Author 1 · Name', oldValue: a.name, newValue: `${parts.slice(-1)[0]} ${parts.slice(0, -1).join(' ')}`.trim(), apply: { kind: 'author', index: 0, prop: 'name' } as ChangeApply }
+  }
 
-  const p1 = pub('IJMAT', 0)
-  if (p1) {
-    const a = authorsOf(p1)[0]
-    add({
-      id: 'PPC-0001', paperId: p1.id, journal: p1.journal, type: 'author_name',
+  // 1 · IJMAT · requested (Support raised it, the Editor has not looked at it yet)
+  const a1 = live('IJMAT')[0]
+  if (a1) {
+    const au = authorsOf(a1)[0]
+    out.push({
+      id: nextId(), paperId: a1.id, journal: 'IJMAT', type: 'author_name', attachmentName: 'passport-first-page.pdf',
       reason: 'The corresponding author’s name was published with the surname and given name transposed. The passport and ORCID record both show the corrected form.',
-      targets: [{ key: 'author-0-name', label: 'Author 1 · Name', oldValue: a.name, newValue: `${a.name.split(' ').slice(-1)[0]} ${a.name.split(' ').slice(0, -1).join(' ')}`.trim(), apply: { kind: 'author', index: 0, prop: 'name' } }],
-      requestedBy: 'Isha Desai', requestedAt: daysAgo(2), status: 'requested', baseVersion: 1, versions: [],
-      events: eventsFor([[2, 'Isha Desai', 'raised a change request', 'Author emailed support with a copy of the passport page.']]),
+      targets: [nameTarget(au)], requestedBy: 'Isha Desai', requestedAt: daysAgo(2), status: 'requested', baseVersion: 1, versions: [],
+      events: ev([[2, 'Isha Desai', 'raised a change request', 'Author emailed support with a copy of the passport page.']]),
     })
   }
-  const p2 = pub('JIMRT', 0)
-  if (p2) {
+  // 2 · IJMAT · under review
+  const a2 = live('IJMAT')[1]
+  if (a2) {
     out.push({
-      id: 'PPC-0002', paperId: p2.id, journal: p2.journal, type: 'correction',
+      id: nextId(), paperId: a2.id, journal: 'IJMAT', type: 'correction', attachmentName: 'lab-report-2026-03.pdf',
+      reason: 'Table 2 reports the tensile strength as 412 MPa; the lab report attached by the author gives 421 MPa.',
+      targets: [{ key: 'text-0', label: 'Corrected text (Table 2)', oldValue: 'tensile strength of 412 MPa', newValue: 'tensile strength of 421 MPa', multiline: true, apply: { kind: 'text' } }],
+      requestedBy: 'Isha Desai', requestedAt: daysAgo(4), status: 'under_review', baseVersion: 1, versions: [],
+      events: ev([[4, 'Isha Desai', 'raised a change request'], [3, 'Rohan Mehta', 'started reviewing the request', 'Checking the lab report against Table 2.']]),
+    })
+  }
+  // 3 · JIMRT · approved, fee pending (the Associate Editor sees it read-only: waiting for fee payment)
+  const j1 = live('JIMRT')[0]
+  if (j1) {
+    const base = 1500
+    out.push({
+      id: nextId(), paperId: j1.id, journal: 'JIMRT', type: 'correction',
       reason: 'The sample size in the Methodology section was reported as n = 214 but the analysis used 241 respondents (a digit transposition).',
       targets: [{ key: 'text-0', label: 'Corrected text (Section 3, paragraph 1)', oldValue: 'Data were gathered from 214 respondents', newValue: 'Data were gathered from 241 respondents', multiline: true, apply: { kind: 'text' } }],
-      requestedBy: 'Neha Kapoor', requestedAt: daysAgo(5), status: 'approved', assigneeId: 'u-ae', baseVersion: 1, versions: [],
-      events: eventsFor([[5, 'Neha Kapoor', 'raised a change request'], [4, 'Rohan Mehta', 'approved the change request', 'Confirmed against the author’s dataset.']]),
+      requestedBy: 'Isha Desai', requestedAt: daysAgo(5), status: 'approved', assigneeId: 'u-ae', baseVersion: 1, versions: [],
+      fee: { state: 'pending', currency: 'INR', base, ...gstInr(base), link: linkFor('JIMRT', 'PPC-0003'), sentAt: daysAgoIso(4) },
+      events: ev([[5, 'Isha Desai', 'raised a change request'], [4, 'Rohan Mehta', 'approved the change request', 'Confirmed against the author’s dataset.'], [4, 'Rohan Mehta', 'set a correction fee of INR 1,770.00 (incl. GST) and sent the payment link']]),
     })
   }
-  const p3 = pub('IJCSD', 0)
-  if (p3) {
-    const a = authorsOf(p3)[0]
+  // 4 · JIMRT · ready for correction, fee paid (the Associate Editor can work)
+  const j2 = live('JIMRT')[1]
+  if (j2) {
+    const au = authorsOf(j2)[0]
+    const base = 1500
     out.push({
-      id: 'PPC-0003', paperId: p3.id, journal: p3.journal, type: 'affiliation',
+      id: nextId(), paperId: j2.id, journal: 'JIMRT', type: 'author_name', attachmentName: 'name-change-affidavit.pdf',
+      reason: 'The author changed their legal name after marriage and the university record now shows the new name.',
+      targets: [{ key: 'author-0-name', label: 'Author 1 · Name', oldValue: au.name, newValue: `${au.name.split(' ')[0]} Verma`, apply: { kind: 'author', index: 0, prop: 'name' } }],
+      requestedBy: 'Isha Desai', requestedAt: daysAgo(9), status: 'ready', assigneeId: 'u-ae', baseVersion: 1, versions: [],
+      fee: { state: 'paid', currency: 'INR', base, ...gstInr(base), link: linkFor('JIMRT', 'PPC-0004'), sentAt: daysAgoIso(8), paidAt: daysAgoIso(6) },
+      events: ev([[9, 'Isha Desai', 'raised a change request'], [8, 'Rohan Mehta', 'approved the change request'], [8, 'Rohan Mehta', 'set a correction fee of INR 1,770.00 (incl. GST) and sent the payment link'], [6, 'System', 'recorded the correction fee payment (prototype)']]),
+    })
+  }
+  // 5 · JIMRT · fee waived, the Editor asked for changes to the first version
+  const j3 = live('JIMRT')[2]
+  if (j3) {
+    const au = authorsOf(j3)[0]
+    const next = 'Department of Management Studies, Indian Institute of Management Indore'
+    out.push({
+      id: nextId(), paperId: j3.id, journal: 'JIMRT', type: 'affiliation',
       reason: 'The author moved institutions before publication; the affiliation on the article page is outdated.',
-      targets: [{ key: 'author-0-affiliation', label: 'Author 1 · Affiliation', oldValue: a.affiliation, newValue: 'Department of Computer Science, Indian Institute of Technology Madras', apply: { kind: 'author', index: 0, prop: 'affiliation' } }],
-      requestedBy: 'Isha Desai', requestedAt: daysAgo(7), status: 'version_review', assigneeId: 'u-ae', baseVersion: 1,
-      versions: [{ n: 2, at: daysAgoIso(1), by: 'Neha Kapoor', summary: 'Updated affiliation as requested', state: 'in_review', changes: [{ field: 'Author 1 · Affiliation', oldValue: a.affiliation, newValue: 'Department of Computer Science, Indian Institute of Technology Madras' }] }],
-      events: eventsFor([[7, 'Isha Desai', 'raised a change request'], [6, 'Rohan Mehta', 'approved the change request'], [1, 'Neha Kapoor', 'submitted version 2 for approval']]),
+      targets: [{ key: 'author-0-affiliation', label: 'Author 1 · Affiliation', oldValue: au.affiliation, newValue: next, apply: { kind: 'author', index: 0, prop: 'affiliation' } }],
+      requestedBy: 'Isha Desai', requestedAt: daysAgo(10), status: 'revision', assigneeId: 'u-ae', baseVersion: 1,
+      fee: { state: 'waived', currency: 'INR', base: 0, gst: 0, gstNote: '', total: 0, waivedReason: 'Error introduced during typesetting.' },
+      decisionNote: 'Please also fix the affiliation spelling in the first line of the PDF header.',
+      versions: [{ n: 2, at: daysAgoIso(3), by: 'Neha Kapoor', summary: 'Updated affiliation as requested', state: 'draft', changes: [{ field: 'Author 1 · Affiliation', oldValue: au.affiliation, newValue: next }] }],
+      events: ev([[10, 'Isha Desai', 'raised a change request'], [9, 'Rohan Mehta', 'approved the change request'], [9, 'Rohan Mehta', 'waived the correction fee', 'Error introduced during typesetting.'], [3, 'Neha Kapoor', 'submitted version 2 for approval'], [2, 'Rohan Mehta', 'asked for changes to version 2', 'Please also fix the affiliation spelling in the first line of the PDF header.']]),
     })
   }
-  const p4 = pub('IJFRD', 0)
-  if (p4) {
+  // 6 · JIMRT · version submitted, fee paid
+  const j4 = live('JIMRT')[3]
+  if (j4) {
+    const base = 1500
+    const notice = 'In the Discussion section, the reference to Figure 4 should read Figure 3.'
     out.push({
-      id: 'PPC-0004', paperId: p4.id, journal: p4.journal, type: 'retraction',
-      reason: 'A duplicate-publication complaint was substantiated: the same dataset and conclusions appear in a paper published earlier elsewhere without disclosure.',
-      targets: [{ key: 'notice', label: 'Retraction notice', oldValue: '', newValue: 'This article has been retracted at the request of the Editor because substantial overlap with a previously published work was identified after publication.', multiline: true, apply: { kind: 'notice' } }],
-      requestedBy: 'Priya Menon', requestedAt: daysAgo(3), status: 'rejected', baseVersion: 1, versions: [],
-      decisionNote: 'Overlap is limited to the dataset description, which the authors cite correctly. A corrigendum is more proportionate than a retraction.',
-      events: eventsFor([[3, 'Priya Menon', 'raised a change request'], [2, 'Rohan Mehta', 'rejected the change request', 'Overlap is limited to the dataset description, which the authors cite correctly. A corrigendum is more proportionate than a retraction.']]),
+      id: nextId(), paperId: j4.id, journal: 'JIMRT', type: 'erratum',
+      reason: 'Figure 3 was cited as Figure 4 in the Discussion; the authors want an erratum published.',
+      targets: [{ key: 'notice', label: 'Erratum notice', oldValue: '', newValue: notice, multiline: true, apply: { kind: 'notice' } }],
+      requestedBy: 'Isha Desai', requestedAt: daysAgo(12), status: 'version_review', assigneeId: 'u-ae', baseVersion: 1,
+      fee: { state: 'paid', currency: 'INR', base, ...gstInr(base), link: linkFor('JIMRT', 'PPC-0006'), sentAt: daysAgoIso(11), paidAt: daysAgoIso(10) },
+      versions: [{ n: 2, at: daysAgoIso(1), by: 'Neha Kapoor', summary: 'Added the erratum notice', state: 'in_review', changes: [{ field: 'Erratum notice', oldValue: '', newValue: notice }] }],
+      events: ev([[12, 'Isha Desai', 'raised a change request'], [11, 'Rohan Mehta', 'approved the change request'], [11, 'Rohan Mehta', 'set a correction fee of INR 1,770.00 (incl. GST) and sent the payment link'], [10, 'System', 'recorded the correction fee payment (prototype)'], [1, 'Neha Kapoor', 'submitted version 2 for approval']]),
     })
   }
+  // 7 · IJCSD · approved, fee not decided yet (the Editor must set or waive it)
+  const c1 = live('IJCSD')[0]
+  if (c1) {
+    const au = authorsOf(c1)[0]
+    out.push({
+      id: nextId(), paperId: c1.id, journal: 'IJCSD', type: 'affiliation',
+      reason: 'The author moved institutions before publication; the affiliation on the article page is outdated.',
+      targets: [{ key: 'author-0-affiliation', label: 'Author 1 · Affiliation', oldValue: au.affiliation, newValue: 'Department of Computer Science, Indian Institute of Technology Madras', apply: { kind: 'author', index: 0, prop: 'affiliation' } }],
+      requestedBy: 'Priya Menon', requestedAt: daysAgo(7), status: 'approved', baseVersion: 1, versions: [],
+      events: ev([[7, 'Priya Menon', 'raised a change request'], [6, 'Rohan Mehta', 'approved the change request']]),
+    })
+  }
+  // 8 · IJCSD · under review, retraction
+  const c2 = live('IJCSD')[1]
+  if (c2) {
+    out.push({
+      id: nextId(), paperId: c2.id, journal: 'IJCSD', type: 'retraction',
+      reason: 'Two readers reported that the benchmark results cannot be reproduced and the authors have not replied to the Editor’s queries.',
+      targets: [{ key: 'notice', label: 'Retraction notice', oldValue: '', newValue: 'This article has been retracted by the Editor because the reported benchmark results could not be reproduced and the authors did not respond to requests for the underlying data.', multiline: true, apply: { kind: 'notice' } }],
+      requestedBy: 'Priya Menon', requestedAt: daysAgo(3), status: 'under_review', baseVersion: 1, versions: [],
+      events: ev([[3, 'Priya Menon', 'raised a change request'], [2, 'Rohan Mehta', 'started reviewing the request']]),
+    })
+  }
+  // 9 · IJFRD · rejected
+  const f1 = live('IJFRD')[0]
+  if (f1) {
+    const why = 'Overlap is limited to the dataset description, which the authors cite correctly. A corrigendum is more proportionate than a retraction.'
+    out.push({
+      id: nextId(), paperId: f1.id, journal: 'IJFRD', type: 'retraction',
+      reason: 'A duplicate-publication complaint was raised: the same dataset appears in a paper published earlier elsewhere without disclosure.',
+      targets: [{ key: 'notice', label: 'Retraction notice', oldValue: '', newValue: 'This article has been retracted at the request of the Editor because substantial overlap with a previously published work was identified after publication.', multiline: true, apply: { kind: 'notice' } }],
+      requestedBy: 'Priya Menon', requestedAt: daysAgo(3), status: 'rejected', baseVersion: 1, versions: [], decisionNote: why,
+      events: ev([[3, 'Priya Menon', 'raised a change request'], [2, 'Priya Menon', 'rejected the change request', why]]),
+    })
+  }
+  // 10 · IJECM · withdrawal requested
+  const e1 = live('IJECM')[0]
+  if (e1) {
+    out.push({
+      id: nextId(), paperId: e1.id, journal: 'IJECM', type: 'withdrawal',
+      reason: 'The authors asked to withdraw the article because the data collection did not have the required ethics clearance.',
+      targets: [{ key: 'notice', label: 'Withdrawal notice', oldValue: '', newValue: 'This article has been withdrawn at the request of the authors because the data collection lacked the required ethics clearance.', multiline: true, apply: { kind: 'notice' } }],
+      requestedBy: 'Priya Menon', requestedAt: daysAgo(1), status: 'requested', baseVersion: 1, versions: [],
+      events: ev([[1, 'Priya Menon', 'raised a change request']]),
+    })
+  }
+  // 11 · completed, with a paid fee
   const done = papers.find((p) => p.status === 'corrected')
   if (done) {
     const a = authorsOf(done)[0]
+    const inr = done.authorCountry === 'India'
+    const base = inr ? 1500 : 25
+    const id = nextId()
     out.push({
-      id: 'PPC-0005', paperId: done.id, journal: done.journal, type: 'affiliation',
+      id, paperId: done.id, journal: done.journal, type: 'affiliation',
       reason: 'Department name was omitted from the first author’s affiliation.',
       targets: [{ key: 'author-0-affiliation', label: 'Author 1 · Affiliation', oldValue: 'Department omitted', newValue: a.affiliation, apply: { kind: 'author', index: 0, prop: 'affiliation' } }],
       requestedBy: 'Isha Desai', requestedAt: daysAgo(30), status: 'completed', assigneeId: 'u-ae', baseVersion: 1,
+      fee: inr
+        ? { state: 'paid', currency: 'INR', base, ...gstInr(base), link: linkFor(done.journal, id), sentAt: daysAgoIso(29), paidAt: daysAgoIso(28) }
+        : { state: 'paid', currency: 'USD', base, gst: 0, gstNote: 'No GST: export of services (USD)', total: base, link: linkFor(done.journal, id), sentAt: daysAgoIso(29), paidAt: daysAgoIso(28) },
       versions: [{ n: 2, at: daysAgoIso(27), by: 'Neha Kapoor', summary: 'Added department to affiliation', state: 'live', changes: [{ field: 'Author 1 · Affiliation', oldValue: 'Department omitted', newValue: a.affiliation }] }],
       result: { at: daysAgoIso(26), by: 'Rohan Mehta', doi: `10.55041/${done.id}`, depositVersion: 2, paperStatus: 'corrected', certificates: [{ authorName: a.name, changed: false }], notified: [a.email] },
-      events: eventsFor([[30, 'Isha Desai', 'raised a change request'], [29, 'Rohan Mehta', 'approved the change request'], [27, 'Neha Kapoor', 'submitted version 2 for approval'], [26, 'Rohan Mehta', 'approved version 2 and applied the change']]),
+      events: ev([[30, 'Isha Desai', 'raised a change request'], [29, 'Rohan Mehta', 'approved the change request'], [28, 'System', 'recorded the correction fee payment (prototype)'], [27, 'Neha Kapoor', 'submitted version 2 for approval'], [26, 'Rohan Mehta', 'approved version 2 and applied the change']]),
     })
   }
   return out

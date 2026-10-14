@@ -12,10 +12,10 @@ import { useAsync } from '@/lib/useAsync'
 import { useUnsavedChanges } from '@/lib/useUnsavedChanges'
 import { cn } from '@/lib/utils'
 import { useScopeJournals } from '@/lib/scope'
-import { usePermission } from '@/permissions/hooks'
 import { authorsOf, createChangeRequest, listPublishedPapers } from '@/mock/api/postPublication'
 import { CHANGE_TYPE_META, type ChangeType } from '@/mock/data/production'
 import type { Paper } from '@/shared/types'
+import { useCanRaise } from './postPubShared'
 
 const TYPES = Object.keys(CHANGE_TYPE_META) as ChangeType[]
 
@@ -23,7 +23,7 @@ export function PostPubNewPage() {
   const navigate = useNavigate()
   const [params] = useSearchParams()
   const journals = useScopeJournals()
-  const perm = usePermission('postPub')
+  const raise = useCanRaise()
   const papers = useAsync(() => listPublishedPapers(journals), [journals.join(',')])
   const [filter, setFilter] = useState('')
   const [paperId, setPaperId] = useState(params.get('paper') ?? '')
@@ -35,10 +35,12 @@ export function PostPubNewPage() {
   const [newText, setNewText] = useState('')
   const [notice, setNotice] = useState('')
   const [fileName, setFileName] = useState('')
+  const [attachment, setAttachment] = useState('')
   const [touched, setTouched] = useState(false)
   const [busy, setBusy] = useState(false)
   const file = useRef<HTMLInputElement>(null)
-  useUnsavedChanges(!busy && (reason.length > 0 || newValue.length > 0 || oldText.length > 0 || notice.length > 0))
+  const attach = useRef<HTMLInputElement>(null)
+  useUnsavedChanges(!busy && (reason.length > 0 || attachment.length > 0 || newValue.length > 0 || oldText.length > 0 || notice.length > 0))
 
   const all = papers.data ?? []
   const paper: Paper | undefined = all.find((p) => p.id === paperId)
@@ -57,7 +59,7 @@ export function PostPubNewPage() {
 
   const err = {
     paper: !paper ? 'Choose a published paper.' : undefined,
-    reason: reason.trim().length < 20 ? 'Explain the reason in at least 20 characters.' : undefined,
+    reason: reason.trim().length < 10 ? 'Give the reason for the request (at least 10 characters).' : undefined,
     value: editsAuthor && newValue.trim().length < 3 ? 'Enter the new value.' : editsAuthor && newValue.trim() === (type === 'author_name' ? authors[authorIndex]?.name : authors[authorIndex]?.affiliation) ? 'The new value is the same as the published one.' : undefined,
     text: type === 'correction' ? (oldText.trim().length < 5 ? 'Quote the text that is wrong.' : newText.trim().length < 2 || newText.trim() === oldText.trim() ? 'Enter the corrected text.' : undefined) : undefined,
     notice: (type === 'erratum' || terminal) && notice.trim().length < 20 ? 'Write the public notice (at least 20 characters).' : undefined,
@@ -70,7 +72,7 @@ export function PostPubNewPage() {
     if (hasErr || !paper) return
     setBusy(true)
     try {
-      const r = await createChangeRequest({ paperId: paper.id, type, reason, authorIndex, newValue, oldText, newText, notice, fileName })
+      const r = await createChangeRequest({ paperId: paper.id, type, reason, authorIndex, newValue, oldText, newText, notice, fileName, attachmentName: attachment })
       toast.success(`${r.id} raised. An Editor will review it.`)
       navigate(`/post-publication/${r.id}`)
     } catch (e) { toast.error((e as Error).message) } finally { setBusy(false) }
@@ -78,7 +80,7 @@ export function PostPubNewPage() {
 
   return (
     <>
-      <PageHeader title="New change request" description="Describe what must change on a published article. An Editor approves it before anyone edits the article." crumbs={[{ label: 'New' }]} />
+      <PageHeader title="New change request" description="Raise a request on behalf of an author. An Editor reviews it (and may set a correction fee) before anyone edits the article." crumbs={[{ label: 'New' }]} />
       <div className="grid max-w-5xl gap-5 lg:grid-cols-2">
         <SectionCard title="1. Published paper">
           <label htmlFor="pp-filter" className="label">Search published papers</label>
@@ -157,6 +159,11 @@ export function PostPubNewPage() {
                   {touched && err.file && <p role="alert" className="mt-1 text-xs text-red-600">{err.file}</p>}
                 </div>
               )}
+              <div>
+                <p className="label">Supporting document <span className="text-xs font-normal text-muted">(optional, prototype: the file is not uploaded)</span></p>
+                <input ref={attach} type="file" accept=".pdf,.png,.jpg,.jpeg,.docx" className="sr-only" tabIndex={-1} aria-label="Choose supporting document" onChange={(e) => setAttachment(e.target.files?.[0]?.name ?? '')} />
+                <button type="button" className="btn-secondary" onClick={() => attach.current?.click()}><FileUp size={15} aria-hidden /> {attachment || 'Attach the author’s email or proof'}</button>
+              </div>
               <FormField label="Reason for the change" required error={touched ? err.reason : undefined} hint="Visible to the Editor and recorded in the audit log.">
                 {(a) => <textarea {...a} rows={4} className="input !h-auto py-2" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Who asked for it, what is wrong, and how it was verified." />}
               </FormField>
@@ -164,7 +171,7 @@ export function PostPubNewPage() {
           </SectionCard>
           <div className="flex justify-end gap-2">
             <button className="btn-secondary" onClick={() => navigate('/post-publication')}>Cancel</button>
-            <GuardedButton allowed={perm.can('work')} why={perm.why('work')} className="btn-primary" disabled={busy} onClick={submit}>{busy ? 'Submitting…' : 'Submit request'}</GuardedButton>
+            <GuardedButton allowed={raise.can} why={raise.why} className="btn-primary" disabled={busy} onClick={submit}>{busy ? 'Submitting…' : 'Submit request'}</GuardedButton>
           </div>
         </div>
       </div>

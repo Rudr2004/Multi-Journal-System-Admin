@@ -5,6 +5,8 @@ import { useDataStore } from '../store'
 import { usePublishingStore } from '../stores/publishing'
 import { ApiError, delay } from './latency'
 import { publishIssue } from './issues'
+import { IN_PRESS_STATUSES, assigneeOf, dueOf, ensureRecord, userName } from './production'
+import { readiness } from '../data/production'
 
 export interface ConferenceRow extends Conference { linkedCount: number; issue?: Issue }
 export interface ConferenceDetail { conference: Conference; issue?: Issue; linked: Paper[]; candidates: Paper[] }
@@ -101,4 +103,36 @@ export const publishProceedings = async (id: string) => {
   const issue = c && issueOf(c)
   if (!c || !issue) throw new ApiError('Create the proceedings issue first.', 'invalid')
   return publishIssue(issue.id)
+}
+
+/* ---------------- Associate Editor: production of conference papers ---------------- */
+
+export interface ConferenceProductionRow { paper: Paper; due: string; missing: number; assigneeId?: string; assigneeName?: string }
+export interface ConferenceProduction { conference: Conference; issue?: Issue; rows: ConferenceProductionRow[] }
+
+function productionRows(links: string[], onlyAssignedTo?: string): ConferenceProductionRow[] {
+  const { papers } = useDataStore.getState()
+  return links
+    .map((pid) => papers.find((p) => p.id === pid))
+    .filter((p): p is Paper => !!p && IN_PRESS_STATUSES.includes(p.status))
+    .filter((p) => !onlyAssignedTo || assigneeOf(p) === onlyAssignedTo)
+    .map((paper) => {
+      const a = assigneeOf(paper)
+      return { paper, due: dueOf(paper), missing: readiness(ensureRecord(paper.id), !!ensureRecord(paper.id).returnNote).missing.length, assigneeId: a, assigneeName: userName(a) }
+    })
+}
+
+export function listConferenceProduction(journals: JournalCode[], onlyAssignedTo?: string) {
+  const { conferences, links } = usePublishingStore.getState()
+  return delay(
+    conferences.filter((c) => journals.includes(c.journal)).sort((a, b) => b.startDate.localeCompare(a.startDate))
+      .map((c): ConferenceProduction => ({ conference: c, issue: issueOf(c), rows: productionRows(links[c.id] ?? [], onlyAssignedTo) })),
+  )
+}
+
+export async function getConferenceProduction(id: string, onlyAssignedTo?: string): Promise<ConferenceProduction> {
+  const { conferences, links } = usePublishingStore.getState()
+  const conference = conferences.find((c) => c.id === id)
+  if (!conference) throw new ApiError('Conference not found', 'not_found')
+  return delay({ conference, issue: issueOf(conference), rows: productionRows(links[id] ?? [], onlyAssignedTo) })
 }

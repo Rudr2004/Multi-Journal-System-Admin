@@ -22,11 +22,18 @@ import { listBackdated, listPastIssues, nextBackdatedSeq, searchBackdatable, sub
 import type { BackdatedItem } from '@/mock/data/production'
 import { useProductionStore } from '@/mock/stores/production'
 import { IssueVsOnline } from './shared'
+import { BackdatedProductionView } from './BackdatedProductionView'
 
-const STEPS = ['Find article', 'Edit details', 'Re-accept', 'Issue & ID', 'Send to approval'] as const
+const STEPS = ['Find article', 'Edit details', 'Re-accept', 'Issue & ID', 'Move to production'] as const
 const ARTICLE_TYPES = ['Research article', 'Review article', 'Case study', 'Short communication']
 
+/** Editor and Super Admin run the full wizard; the Associate Editor only completes the production step. */
 export function BackdatedPage() {
+  const perm = usePermission('backdated')
+  return perm.can('approve') ? <BackdatedWizard /> : <BackdatedProductionView />
+}
+
+function BackdatedWizard() {
   const journals = useScopeJournals()
   const all = useIsAllJournals()
   const perm = usePermission('backdated')
@@ -82,7 +89,7 @@ export function BackdatedPage() {
     try {
       const item = await submitBackdated({ paperId: paper.id, title, author, articleType, acceptNote: note, issueId, generateId: generate })
       setDone(item)
-      toast.success(`${item.finalId} sent to final approval.`)
+      toast.success(`${item.finalId} moved to production.`)
     } catch (e) { toast.error((e as Error).message) } finally { setBusy(false) }
   }
   const restart = () => { setDone(null); setStep(0); setPaper(null); setQuery(''); setDebounced(''); setTouched(false); search.reload() }
@@ -95,7 +102,7 @@ export function BackdatedPage() {
     { id: 'was', header: 'Was', cell: (r) => r.originalStatus, defaultHidden: true },
     { id: 'by', header: 'By', cell: (r) => r.createdBy },
     { id: 'at', header: 'Created', cell: (r) => <RelativeTime value={r.createdAt} />, sort: (r) => r.createdAt },
-    { id: 'status', header: 'Status', cell: (r) => (r.status === 'published' ? <Badge tone="success">Published</Badge> : <Badge tone="accent">In final approval</Badge>) },
+    { id: 'status', header: 'Status', cell: (r) => (r.status === 'published' ? <Badge tone="success">Published</Badge> : r.status === 'in_production' ? <Badge tone="info">In production</Badge> : <Badge tone="accent">In final approval</Badge>) },
   ]
 
   return (
@@ -107,11 +114,11 @@ export function BackdatedPage() {
           <div className="flex items-start gap-3">
             <CheckCircle2 size={24} className="mt-0.5 shrink-0 text-green-600" aria-hidden />
             <div className="min-w-0 flex-1">
-              <h2 className="text-lg font-semibold">Sent to final approval</h2>
-              <p className="mt-1 text-sm text-muted"><span className="font-medium text-ink">{done.finalId}</span>{done.generatedId && <> (generated; the original ID {done.originalId} was unavailable)</>} is now waiting in the final-approval queue for {done.issueLabel}.</p>
+              <h2 className="text-lg font-semibold">Moved to production</h2>
+              <p className="mt-1 text-sm text-muted"><span className="font-medium text-ink">{done.finalId}</span>{done.generatedId && <> (generated; the original ID {done.originalId} was unavailable)</>} is now in production for {done.issueLabel}. {done.unassigned ? 'No Associate Editor is assigned to this journal yet, so it is unassigned: assign one in User Management.' : 'It is assigned to the journal’s Associate Editor, who completes production and sends it for final approval.'}</p>
               <div className="mt-4 max-w-xl"><IssueVsOnline issueDate={done.issueDate} /></div>
               <div className="mt-5 flex flex-wrap gap-2">
-                <Link to={`/final-approval/${done.finalId}`} className="btn-primary">Open in final approval <ArrowRight size={14} aria-hidden /></Link>
+                <Link to={`/production/${done.finalId}`} className="btn-primary">Open production workspace <ArrowRight size={14} aria-hidden /></Link>
                 <button className="btn-secondary" onClick={restart}>Backdate another article</button>
               </div>
             </div>
@@ -232,7 +239,7 @@ export function BackdatedPage() {
                   { label: 'Re-acceptance reason', value: note },
                 ]} />
                 <IssueVsOnline issueDate={issue.publicationDate} />
-                <p className="text-sm text-muted">The article moves to <span className="font-medium text-ink">Ready for approval</span>. An Editor publishes it from Final approval.</p>
+                <p className="text-sm text-muted">The article moves to <span className="font-medium text-ink">In production</span> and is assigned to the journal’s Associate Editor. When production is complete it goes to Final approval, where an Editor publishes it.</p>
               </div>
             )}
           </div>
@@ -241,18 +248,18 @@ export function BackdatedPage() {
             {step < 4 ? (
               <button className="btn-primary" disabled={step === 0 && !paper} onClick={next}>Continue <ArrowRight size={14} aria-hidden /></button>
             ) : (
-              <GuardedButton allowed={perm.can('approve')} why={perm.why('approve')} className="btn-primary" disabled={busy} onClick={() => setConfirm(true)}><History size={14} aria-hidden /> Send to approval</GuardedButton>
+              <GuardedButton allowed={perm.can('approve')} why={perm.why('approve')} className="btn-primary" disabled={busy} onClick={() => setConfirm(true)}><History size={14} aria-hidden /> Move to production</GuardedButton>
             )}
           </footer>
         </section>
       )}
 
-      <ConfirmDialog open={confirm} onClose={() => setConfirm(false)} onConfirm={submit} title="Send backdated article to final approval?" confirmLabel="Send to approval"
+      <ConfirmDialog open={confirm} onClose={() => setConfirm(false)} onConfirm={submit} title="Move backdated article to production?" confirmLabel="Move to production"
         consequences={[
           paper ? `Re-accept ${paper.id} and edit its details as entered.` : 'Re-accept the paper.',
           generate ? `Assign the new ID ${newId ?? ''} and consume number ${seq} of the ${paper?.journal ?? ''} backdated sequence.` : 'Keep the original ID.',
           `Place it in ${issue?.label ?? 'the chosen issue'} with the issue date ${issue ? formatDate(issue.publicationDate) : ''}; the actual online date will be today.`,
-          'Move it to Ready for approval. Nothing is published until an Editor approves it.',
+          'Move it to In production and assign it to the journal’s Associate Editor (or leave it unassigned if the journal has none). Nothing is published until an Editor approves it in Final approval.',
         ]} />
 
       <div className="mt-8">

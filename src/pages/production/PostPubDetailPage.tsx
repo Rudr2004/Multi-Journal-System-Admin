@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { ArrowLeft, Check, CheckCircle2, FileCheck2, FileUp, Mail, Award, Send, ThumbsDown, ThumbsUp } from 'lucide-react'
+import { ArrowLeft, Check, CheckCircle2, Copy, FileCheck2, FileUp, Link2, Mail, Award, Paperclip, Send, ThumbsDown, ThumbsUp } from 'lucide-react'
 import { PageHeader } from '@/layout/PageHeader'
 import { Badge, JournalBadge, StatusBadge } from '@/components/Badges'
 import { SectionCard } from '@/components/Card'
@@ -8,25 +8,30 @@ import { CertificatePreview } from '@/components/CertificatePreview'
 import { ConfirmDialog } from '@/components/Dialog'
 import { DescriptionList, FormField } from '@/components/Form'
 import { ReasonDialog } from '@/components/ReasonDialog'
-import { ErrorState, Skeleton } from '@/components/States'
+import { EmptyState, ErrorState, Skeleton } from '@/components/States'
 import { Timeline } from '@/components/Timeline'
 import { GuardedButton } from '@/components/Tooltip'
 import { toast } from '@/components/Toasts'
 import { useAsync } from '@/lib/useAsync'
 import { cn } from '@/lib/utils'
-import { useCan, useCanAct, usePermission } from '@/permissions/hooks'
-import { useDataStore } from '@/mock/store'
+import { useCurrentUser, usePermission } from '@/permissions/hooks'
+import { FLAG_META } from '@/permissions/flags'
+import { useDataStore, useSession } from '@/mock/store'
 import { useProductionStore } from '@/mock/stores/production'
-import { decideChangeRequest, getChangeRequest, reviewNewVersion, submitNewVersion, type ChangeDetail } from '@/mock/api/postPublication'
+import {
+  decideChangeRequest, getChangeRequest, markFeePaid, previewFee, releaseWithoutFee, reviewNewVersion, setCorrectionFee, startReview,
+  submitNewVersion, waiveCorrectionFee, workBlockReason, type ChangeDetail,
+} from '@/mock/api/postPublication'
 import { CHANGE_TYPE_META, type ChangeRequest } from '@/mock/data/production'
-import { formatDate, formatDateTime } from '@/shared/formatters'
+import { formatDate, formatDateTime, formatMoney } from '@/shared/formatters'
 import { doiFor } from '@/shared/paperId'
-import { ChangeStatusBadge, ChangeTypeBadge } from './postPubShared'
+import type { Currency } from '@/shared/gst'
+import { ChangeStatusBadge, ChangeTypeBadge, FeeBadge } from './postPubShared'
 
 export function PostPubDetailPage() {
   const { id = '' } = useParams()
   const rev = useProductionStore((s) => s.changeRequests.find((r) => r.id === id))
-  const key = rev ? `${rev.status}:${rev.versions.length}:${rev.events.length}` : ''
+  const key = rev ? `${rev.status}:${rev.versions.length}:${rev.events.length}:${rev.fee?.state ?? ''}` : ''
   const q = useAsync(() => getChangeRequest(id), [id, key])
   const crumbs = [{ label: id }]
   if (q.error) return (<><PageHeader title="Change request" crumbs={crumbs} /><div className="card"><ErrorState message={q.error.message} onRetry={q.reload} /></div></>)
@@ -34,29 +39,39 @@ export function PostPubDetailPage() {
   return <Detail detail={{ ...q.data, request: rev ?? q.data.request }} />
 }
 
-const stepsFor = (r: ChangeRequest) => (CHANGE_TYPE_META[r.type].editsArticle
-  ? ['Requested', 'Approved', 'New version', 'Version approved', 'Published']
-  : ['Requested', 'Approved & applied'])
-const stepIndex = (r: ChangeRequest) => {
-  const edits = CHANGE_TYPE_META[r.type].editsArticle
+type StepKey = 'requested' | 'review' | 'approved' | 'fee' | 'ready' | 'version' | 'done'
+const STEP_LABEL: Record<StepKey, string> = { requested: 'Requested', review: 'Under review', approved: 'Approved', fee: 'Fee paid or waived', ready: 'Ready for correction', version: 'Version submitted', done: 'Completed' }
+
+function stepsFor(r: ChangeRequest, hasFee: boolean): StepKey[] {
+  if (!CHANGE_TYPE_META[r.type].editsArticle) return ['requested', 'review', 'done']
+  return hasFee ? ['requested', 'review', 'approved', 'fee', 'ready', 'version', 'done'] : ['requested', 'review', 'approved', 'ready', 'version', 'done']
+}
+function stepIndex(r: ChangeRequest, steps: StepKey[]) {
+  const at = (k: StepKey) => steps.indexOf(k)
   switch (r.status) {
-    case 'requested': case 'rejected': return 0
-    case 'approved': return 1
-    case 'revision': return 2
-    case 'version_review': return 3
-    case 'completed': return edits ? 5 : 2
+    case 'requested': return at('requested')
+    case 'under_review': case 'rejected': return at('review')
+    case 'approved': return steps.includes('fee') ? at('fee') : at('approved')
+    case 'ready': case 'revision': return at('ready')
+    case 'version_review': return at('version')
+    case 'completed': return steps.length
   }
 }
 
 function Detail({ detail }: { detail: ChangeDetail }) {
   const { request: r, paper } = detail
   const perm = usePermission('postPub')
-  const canApprove = useCan('postPub', 'approve')
-  const canEdit = useCanAct('postPub', 'work', r.assigneeId)
+  const user = useCurrentUser()
+  const feeOn = useSession((s) => s.flags.correctionFee)
+  const isAe = perm.role === 'associate_editor'
+  const isSupport = perm.role === 'support'
+  const canApprove = perm.can('approve')
+  const canEdit = isAe && r.assigneeId === user?.id
   const users = useDataStore((s) => s.users)
   const meta = CHANGE_TYPE_META[r.type]
-  const steps = stepsFor(r)
-  const current = stepIndex(r)
+  const hasFee = meta.editsArticle && (feeOn || !!r.fee)
+  const steps = stepsFor(r, hasFee)
+  const current = stepIndex(r, steps)
   const [reject, setReject] = useState(false)
   const [confirmApprove, setConfirmApprove] = useState(false)
   const [confirmVersion, setConfirmVersion] = useState(false)
@@ -70,21 +85,31 @@ function Detail({ detail }: { detail: ChangeDetail }) {
   }
   const approveLabel = r.type === 'retraction' ? 'Approve retraction' : r.type === 'withdrawal' ? 'Approve withdrawal' : 'Approve request'
 
+  // Support only sees requests they raised; the Associate Editor only sees requests the Editor has approved.
+  if ((isSupport && r.requestedBy !== user?.name) || (isAe && (!meta.editsArticle || ['requested', 'under_review', 'rejected'].includes(r.status)))) {
+    return (
+      <>
+        <PageHeader title={r.id} crumbs={[{ label: r.id }]} actions={<Link to="/post-publication" className="btn-secondary"><ArrowLeft size={14} aria-hidden /> All requests</Link>} />
+        <div className="card"><EmptyState icon={Link2} title="This request is not available to you" hint={isSupport ? 'You can open requests you raised yourself.' : 'It appears here once the Editor has approved it.'} /></div>
+      </>
+    )
+  }
+
   return (
     <>
       <PageHeader title={r.id} description={`${meta.label} · ${paper.title}`} crumbs={[{ label: r.id }]}
         actions={<Link to="/post-publication" className="btn-secondary"><ArrowLeft size={14} aria-hidden /> All requests</Link>} />
       <div className="mb-5 flex flex-wrap items-center gap-3 text-sm">
-        <JournalBadge code={r.journal} /><ChangeTypeBadge type={r.type} /><ChangeStatusBadge status={r.status} />
+        <JournalBadge code={r.journal} /><ChangeTypeBadge type={r.type} /><ChangeStatusBadge status={r.status} />{hasFee && r.status !== 'rejected' && r.status !== 'requested' && r.status !== 'under_review' && <FeeBadge fee={r.fee} />}
         <span className="text-muted">Paper <span className="whitespace-nowrap text-ink">{paper.id}</span></span><StatusBadge status={paper.status} />
-        <Link to={`/submissions/${paper.id}`} className="text-accent hover:underline">Submission record</Link>
+        {!isSupport && !isAe && <Link to={`/submissions/${paper.id}`} className="text-accent hover:underline">Submission record</Link>}
       </div>
 
       <ol aria-label="Progress" className="mb-6 grid gap-2" style={{ gridTemplateColumns: `repeat(${steps.length}, minmax(0, 1fr))` }}>
         {steps.map((s, i) => (
           <li key={s} aria-current={i === current ? 'step' : undefined}>
             <div className={cn('h-1 rounded-full', r.status === 'rejected' ? 'bg-red-300' : i <= current ? 'bg-accent' : 'bg-slate-200')} />
-            <p className={cn('mt-1.5 flex items-center gap-1 text-xs', i === current ? 'font-semibold text-ink' : 'text-muted')}>{i < current && <Check size={12} className="text-accent" aria-hidden />}{s}</p>
+            <p className={cn('mt-1.5 flex items-center gap-1 text-xs', i === current ? 'font-semibold text-ink' : 'text-muted')}>{i < current && <Check size={12} className="text-accent" aria-hidden />}{STEP_LABEL[s]}</p>
           </li>
         ))}
       </ol>
@@ -95,8 +120,9 @@ function Detail({ detail }: { detail: ChangeDetail }) {
             <DescriptionList items={[
               { label: 'Raised by', value: `${r.requestedBy} · ${formatDateTime(r.requestedAt)}` },
               { label: 'Current article version', value: `Version ${r.baseVersion}` },
-              { label: 'Assigned to (edits new version)', value: users.find((u) => u.id === r.assigneeId)?.name ?? 'Assigned when approved' },
+              { label: 'Associate Editor (prepares the new version)', value: users.find((u) => u.id === r.assigneeId)?.name ?? (['requested', 'under_review'].includes(r.status) ? 'Assigned when approved' : 'Not assigned: no Associate Editor in this journal') },
               { label: 'DOI', value: <span className="font-mono text-xs">{doiFor(paper.id)}</span> },
+              ...(r.attachmentName ? [{ label: 'Attachment', value: <span className="inline-flex items-center gap-1"><Paperclip size={13} aria-hidden /> {r.attachmentName}</span> }] : []),
             ]} />
             <div className="mt-4"><p className="text-xs text-muted">Reason</p><p className="mt-0.5 text-sm">{r.reason}</p></div>
             <div className="mt-4 overflow-x-auto">
@@ -109,38 +135,71 @@ function Detail({ detail }: { detail: ChangeDetail }) {
               </table>
             </div>
             {r.status === 'rejected' && <p role="note" className="mt-4 rounded-md bg-red-50 p-3 text-sm text-red-900"><span className="font-medium">Rejected.</span> {r.decisionNote}</p>}
+            {isSupport && ['requested', 'under_review'].includes(r.status) && <p role="note" className="mt-4 rounded-md bg-slate-50 p-3 text-sm text-muted">The Editor is reviewing this request. You will see the outcome here; tell the author once it is approved or rejected.</p>}
           </SectionCard>
 
-          {r.status === 'requested' && (
+          {(r.status === 'requested' || r.status === 'under_review') && !isSupport && (
             <SectionCard title="Decision">
-              <p className="mb-3 text-sm text-muted">{canApprove ? (meta.editsArticle ? 'Approving lets the Associate Editor prepare a new version of the article, which you then approve.' : 'Approving applies this change to the live record immediately.') : 'Only an Editor can approve or reject this request.'}</p>
+              <p className="mb-3 text-sm text-muted">{canApprove
+                ? meta.editsArticle
+                  ? feeOn ? 'Approving moves the request to the fee step. Once the correction fee is paid or waived, the Associate Editor prepares a new version for your approval.' : 'Approving releases the request to the Associate Editor, who prepares a new version for your approval.'
+                  : 'Retractions and withdrawals skip the fee and version steps: approving applies the change to the live record immediately.'
+                : 'Only an Editor can approve or reject this request.'}</p>
               <div className="flex flex-wrap gap-2">
-                <GuardedButton allowed={canApprove} why={perm.why('approve')} className={meta.editsArticle ? 'btn-primary' : 'btn-danger'} disabled={busy} onClick={() => (meta.editsArticle ? act(() => decideChangeRequest(r.id, 'approve'), 'Request approved.') : setConfirmApprove(true))}><ThumbsUp size={15} aria-hidden /> {approveLabel}</GuardedButton>
+                {r.status === 'requested' && (
+                  <GuardedButton allowed={canApprove} why={perm.why('approve')} className="btn-secondary" disabled={busy} onClick={() => act(() => startReview(r.id), 'Marked as under review.')}>Start review</GuardedButton>
+                )}
+                <GuardedButton allowed={canApprove} why={perm.why('approve')} className={meta.editsArticle ? 'btn-primary' : 'btn-danger'} disabled={busy} onClick={() => (meta.editsArticle ? act(() => decideChangeRequest(r.id, 'approve'), feeOn ? 'Approved. Set or waive the correction fee next.' : 'Approved and released to the Associate Editor.') : setConfirmApprove(true))}><ThumbsUp size={15} aria-hidden /> {approveLabel}</GuardedButton>
                 <GuardedButton allowed={canApprove} why={perm.why('approve')} className="btn-secondary" disabled={busy} onClick={() => setReject(true)}><ThumbsDown size={15} aria-hidden /> Reject</GuardedButton>
               </div>
             </SectionCard>
           )}
 
-          {(r.status === 'approved' || r.status === 'revision') && (
-            <NewVersionForm key={`${r.id}-${r.versions.length}-${r.events.length}`} request={r} canEdit={canEdit} why={perm.why('work') ?? 'This request is assigned to another Associate Editor.'} busy={busy}
-              onSubmit={(values, summary) => act(() => submitNewVersion(r.id, values, summary), `Version ${r.baseVersion + 1} submitted for approval.`)} />
+          {hasFee && ['approved', 'ready', 'revision', 'version_review', 'completed'].includes(r.status) && (
+            <FeeSection request={r} detail={detail} canApprove={canApprove} why={perm.why('approve')} busy={busy} act={act} />
+          )}
+          {!hasFee && r.status === 'approved' && meta.editsArticle && (
+            <SectionCard title="Correction fee">
+              <p className="mb-3 text-sm text-muted">The correction fee is switched off, so there is no fee step.</p>
+              <GuardedButton allowed={canApprove} why={perm.why('approve')} className="btn-primary" disabled={busy} onClick={() => act(() => releaseWithoutFee(r.id), 'Released to the Associate Editor.')}><Send size={15} aria-hidden /> Release to Associate Editor</GuardedButton>
+            </SectionCard>
+          )}
+
+          {r.status === 'approved' && (isAe || canApprove) && (
+            <SectionCard title="Prepare new version">
+              <p role="status" className="rounded-md bg-amber-50 p-3 text-sm text-amber-900"><span className="font-medium">Read-only for now.</span> {workBlockReason(r)}</p>
+            </SectionCard>
+          )}
+
+          {(r.status === 'ready' || r.status === 'revision') && (
+            canEdit || isAe ? (
+              <NewVersionForm key={`${r.id}-${r.versions.length}-${r.events.length}`} request={r} canEdit={canEdit} why={perm.why('work') ?? 'This request is assigned to another Associate Editor.'} busy={busy}
+                onSubmit={(values, summary) => act(() => submitNewVersion(r.id, values, summary), `Version ${r.baseVersion + 1} sent back to the Editor for approval.`)} />
+            ) : (
+              <SectionCard title="With the Associate Editor">
+                <p className="text-sm text-muted">{users.find((u) => u.id === r.assigneeId)?.name ?? 'The Associate Editor'} is preparing version {r.baseVersion + 1}. You approve it when it comes back.
+                  {r.status === 'revision' && r.decisionNote ? ` Your note: “${r.decisionNote}”` : ''}</p>
+              </SectionCard>
+            )
           )}
 
           {r.status === 'version_review' && latest && (
             <SectionCard title={`Review version ${latest.n}`}>
               <p className="mb-3 text-sm text-muted">{latest.summary} · prepared by {latest.by}</p>
               <DiffTable version={latest} />
-              <div className="mt-4 flex flex-wrap gap-2">
-                <GuardedButton allowed={canApprove} why={perm.why('approve')} className="btn-primary" disabled={busy} onClick={() => setConfirmVersion(true)}><ThumbsUp size={15} aria-hidden /> Approve version {latest.n}</GuardedButton>
-                <GuardedButton allowed={canApprove} why={perm.why('approve')} className="btn-secondary" disabled={busy} onClick={() => setChanges(true)}>Request changes</GuardedButton>
-              </div>
+              {canApprove ? (
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <GuardedButton allowed={canApprove} why={perm.why('approve')} className="btn-primary" disabled={busy} onClick={() => setConfirmVersion(true)}><ThumbsUp size={15} aria-hidden /> Approve version {latest.n}</GuardedButton>
+                  <GuardedButton allowed={canApprove} why={perm.why('approve')} className="btn-secondary" disabled={busy} onClick={() => setChanges(true)}>Request changes</GuardedButton>
+                </div>
+              ) : <p className="mt-3 text-sm text-muted">Sent back to the Editor for approval. You will see the result here.</p>}
             </SectionCard>
           )}
 
           {r.status === 'completed' && r.result && <ResultPanel r={r} detail={detail} />}
 
           {r.versions.length > 0 && (
-            <SectionCard title="Version history">
+            <SectionCard title="Version history (old vs new)">
               <ol className="space-y-5">
                 <li>
                   <p className="text-sm font-medium">Version {r.baseVersion} <Badge tone={r.status === 'completed' ? 'neutral' : 'success'}>{r.status === 'completed' ? 'Superseded' : 'Live'}</Badge></p>
@@ -188,6 +247,86 @@ function Detail({ detail }: { detail: ChangeDetail }) {
   )
 }
 
+/** Correction fee: Editor sets or waives it, the payment link goes to the author and the status is tracked. */
+function FeeSection({ request: r, detail, canApprove, why, busy, act }: {
+  request: ChangeRequest; detail: ChangeDetail; canApprove: boolean; why?: string; busy: boolean
+  act: (fn: () => Promise<unknown>, ok: string) => Promise<void>
+}) {
+  const { paper } = detail
+  const indian = paper.authorCountry === 'India'
+  const [currency, setCurrency] = useState<Currency>(indian ? 'INR' : 'USD')
+  const [base, setBase] = useState(indian ? '1500' : '25')
+  const [waive, setWaive] = useState(false)
+  const amount = Number(base)
+  const invalid = !(amount > 0)
+  const g = useMemo(() => (invalid ? null : previewFee(currency, amount)), [currency, amount, invalid])
+  const fee = r.fee
+  const decide = r.status === 'approved' && !fee
+
+  const copy = async (text: string) => {
+    try { await navigator.clipboard.writeText(text); toast.success('Payment link copied.') } catch { toast.info('Copy is not available here. Select the link and copy it manually.') }
+  }
+
+  return (
+    <SectionCard title="Correction fee" action={<Badge tone="accent">{FLAG_META.correctionFee.badge}</Badge>}>
+      {decide && (
+        <>
+          <p className="mb-3 text-sm text-muted">Set a fee for this correction, or waive it. The author receives a payment link by email and the Associate Editor can start once the fee is paid or waived.</p>
+          <fieldset disabled={!canApprove} className="grid min-w-0 gap-4 sm:grid-cols-2">
+            <FormField label="Currency">
+              {(a) => <select {...a} className="input" value={currency} onChange={(e) => setCurrency(e.target.value as Currency)}><option value="INR">INR (Indian authors, GST applies)</option><option value="USD">USD (no GST)</option></select>}
+            </FormField>
+            <FormField label="Fee before tax" required error={invalid ? 'Enter an amount greater than zero.' : undefined}>
+              {(a) => <input {...a} type="number" min={1} step="0.01" inputMode="decimal" className="input" value={base} onChange={(e) => setBase(e.target.value)} />}
+            </FormField>
+          </fieldset>
+          {g && (
+            <dl className="mt-3 grid max-w-sm grid-cols-2 gap-x-4 gap-y-1 text-sm" aria-label="Fee breakdown">
+              <dt className="text-muted">Fee</dt><dd className="text-right tabular-nums">{formatMoney(g.base, g.currency)}</dd>
+              {g.cgst > 0 && <><dt className="text-muted">CGST 9%</dt><dd className="text-right tabular-nums">{formatMoney(g.cgst, g.currency)}</dd><dt className="text-muted">SGST 9%</dt><dd className="text-right tabular-nums">{formatMoney(g.sgst, g.currency)}</dd></>}
+              {g.igst > 0 && <><dt className="text-muted">IGST 18%</dt><dd className="text-right tabular-nums">{formatMoney(g.igst, g.currency)}</dd></>}
+              <dt className="font-medium">Total payable</dt><dd className="text-right font-medium tabular-nums">{formatMoney(g.total, g.currency)}</dd>
+              <dd className="col-span-2 text-xs text-muted">{g.note}</dd>
+            </dl>
+          )}
+          <div className="mt-4 flex flex-wrap gap-2">
+            <GuardedButton allowed={canApprove && !invalid} why={why ?? 'Enter the fee amount first.'} className="btn-primary" disabled={busy} onClick={() => act(() => setCorrectionFee(r.id, currency, amount), 'Fee set and payment link sent to the author.')}><Send size={15} aria-hidden /> Send payment link</GuardedButton>
+            <GuardedButton allowed={canApprove} why={why} className="btn-secondary" disabled={busy} onClick={() => setWaive(true)}>Waive fee</GuardedButton>
+          </div>
+        </>
+      )}
+      {!decide && !fee && <p className="text-sm text-muted">No fee was set for this request.</p>}
+      {fee && (
+        <div className="space-y-3 text-sm">
+          <div className="flex flex-wrap items-center gap-2"><FeeBadge fee={fee} />
+            {fee.state !== 'waived' && <span className="tabular-nums">{formatMoney(fee.total, fee.currency)}{fee.gst > 0 ? ` (fee ${formatMoney(fee.base, fee.currency)} + ${fee.gstNote})` : ` · ${fee.gstNote}`}</span>}
+            {fee.state === 'paid' && fee.paidAt && <span className="text-muted">Paid {formatDate(fee.paidAt)}</span>}
+          </div>
+          {fee.state === 'waived' && <p className="text-muted">Waived: {fee.waivedReason}</p>}
+          {fee.link && fee.state !== 'waived' && (
+            <div>
+              <p className="label">Correction fee payment link{fee.sentAt ? ` · sent ${formatDate(fee.sentAt)}` : ''}</p>
+              <div className="flex items-center gap-2">
+                <input readOnly aria-label="Payment link" className="input font-mono text-xs" value={fee.link} onFocus={(e) => e.currentTarget.select()} />
+                <button type="button" className="btn-secondary shrink-0" onClick={() => copy(fee.link!)}><Copy size={14} aria-hidden /> Copy</button>
+              </div>
+            </div>
+          )}
+          {fee.state === 'pending' && (
+            <div className="rounded-md border border-dashed border-amber-300 bg-amber-50 p-3">
+              <p className="text-xs text-amber-900"><span className="font-medium">Prototype only.</span> Real payments are not connected. This button simulates the author paying through the link.</p>
+              <GuardedButton allowed={canApprove} why={why} className="btn-secondary mt-2" disabled={busy} onClick={() => act(() => markFeePaid(r.id), 'Marked as paid. The Associate Editor can start.')}><Check size={14} aria-hidden /> Mark as paid (simulate)</GuardedButton>
+            </div>
+          )}
+        </div>
+      )}
+      <ReasonDialog open={waive} onClose={() => setWaive(false)} title="Waive the correction fee" label="Reason for waiving" confirmLabel="Waive fee"
+        description="The request goes straight to the Associate Editor. The reason is recorded in the audit log."
+        onSubmit={(note) => act(() => waiveCorrectionFee(r.id, note), 'Fee waived. Released to the Associate Editor.')} />
+    </SectionCard>
+  )
+}
+
 function DiffTable({ version, baseVersion }: { version: ChangeRequest['versions'][number]; baseVersion?: number }) {
   return (
     <div className="overflow-x-auto">
@@ -217,9 +356,9 @@ function NewVersionForm({ request: r, canEdit, why, busy, onSubmit }: { request:
   const n = r.baseVersion + 1
   const submit = () => { setTouched(true); if (!unchanged && !blank && summary.trim().length >= 5) onSubmit(values, summary) }
   return (
-    <SectionCard title={`Edit new version (v${n})`}>
+    <SectionCard title={`Prepare new version (v${n})`}>
       {r.status === 'revision' && r.decisionNote && <p role="note" className="mb-4 rounded-md bg-amber-50 p-3 text-sm text-amber-900"><span className="font-medium">Editor’s note:</span> {r.decisionNote}</p>}
-      <p className="mb-4 text-sm text-muted">The published article (version {r.baseVersion}) stays live until version {n} is approved. Check the proposed values and adjust them if needed.</p>
+      <p className="mb-4 text-sm text-muted">The published article (version {r.baseVersion}) stays live until version {n} is approved. Check the proposed values and adjust them if needed, then send it back to the Editor for approval.</p>
       <fieldset disabled={!canEdit} className="min-w-0 space-y-4">
         {r.targets.map((t) => (
           <FormField key={t.key} label={t.label} required error={touched && !(values[t.key] ?? '').trim() ? 'This value is required.' : undefined} hint={t.oldValue ? `As published: ${t.oldValue}` : undefined}>
@@ -241,7 +380,7 @@ function NewVersionForm({ request: r, canEdit, why, busy, onSubmit }: { request:
         </FormField>
       </fieldset>
       <div className="mt-4 flex justify-end">
-        <GuardedButton allowed={canEdit} why={why} className="btn-primary" disabled={busy} onClick={submit}><Send size={15} aria-hidden /> Submit version {n} for approval</GuardedButton>
+        <GuardedButton allowed={canEdit} why={why} className="btn-primary" disabled={busy} onClick={submit}><Send size={15} aria-hidden /> Send back to Editor (version {n})</GuardedButton>
       </div>
     </SectionCard>
   )

@@ -9,6 +9,8 @@ import { useProductionStore } from '../stores/production'
 import { ApiError, delay } from './latency'
 
 export const PRODUCTION_STATUSES: PaperStatus[] = ['paid', 'in_production', 'returned_to_production', 'ready_for_approval']
+/** Papers that are listed publicly on the Article In Press page while the Associate Editor works on them. */
+export const IN_PRESS_STATUSES: PaperStatus[] = ['in_production', 'returned_to_production', 'ready_for_approval']
 export const PUBLISHED_STATUSES: PaperStatus[] = ['published', 'indexed', 'corrected', 'retracted']
 
 const store = () => useDataStore.getState()
@@ -44,6 +46,8 @@ export interface QueueRow {
   due: string
   missing: number
   returned: boolean
+  /** Listed on the Article In Press page until the Editor publishes it. */
+  inPress: boolean
 }
 
 export async function listProductionQueue(journals: JournalCode[], onlyAssignedTo?: string): Promise<QueueRow[]> {
@@ -53,7 +57,7 @@ export async function listProductionQueue(journals: JournalCode[], onlyAssignedT
     .map((p) => {
       const rec = ensureRecord(p.id)
       const a = assigneeOf(p)
-      return { paper: p, assigneeId: a, assigneeName: userName(a), due: dueOf(p), missing: readiness(rec, !!rec.returnNote).missing.length, returned: p.status === 'returned_to_production' }
+      return { paper: p, assigneeId: a, assigneeName: userName(a), due: dueOf(p), missing: readiness(rec, !!rec.returnNote).missing.length, returned: p.status === 'returned_to_production', inPress: IN_PRESS_STATUSES.includes(p.status) }
     })
   return delay(rows)
 }
@@ -130,6 +134,8 @@ export async function sendForFinalApproval(paperId: string): Promise<Readiness> 
   saveRecord(paperId, { ...rec, sentAt: new Date().toISOString(), returnAcknowledged: false })
   // keep the author list used by certificates and the article page consistent across the system
   useDataStore.getState().patch({ authorsOverride: { ...store().authorsOverride, [paperId]: rec.authors } })
+  const bd = pstore().backdated.find((b) => b.finalId === paperId && b.status === 'in_production')
+  if (bd) pstore().patch({ backdated: pstore().backdated.map((b) => (b.id === bd.id ? { ...b, status: 'pending_approval' } : b)) })
   updatePaper(paperId, { status: 'ready_for_approval' }, { event: 'Sent for final approval', note: rec.returnNote ? 'Resubmitted after addressing the Editor’s return note.' : undefined, audit: 'Sent for final approval' })
   return delay(r, 300, 600)
 }
@@ -219,6 +225,8 @@ export async function returnToProduction(paperId: string, note: string): Promise
   if (!paper || paper.status !== 'ready_for_approval') throw new ApiError('Only papers that are ready for approval can be returned.')
   const rec = ensureRecord(paperId)
   saveRecord(paperId, { ...rec, returnNote: { text: note, by: currentActor(), at: new Date().toISOString() }, returnAcknowledged: false, sentAt: undefined })
+  const bd = pstore().backdated.find((b) => b.finalId === paperId && b.status === 'pending_approval')
+  if (bd) pstore().patch({ backdated: pstore().backdated.map((b) => (b.id === bd.id ? { ...b, status: 'in_production' } : b)) })
   updatePaper(paperId, { status: 'returned_to_production' }, { event: 'Returned to production', note, audit: 'Returned to production' })
   const assignee = assigneeOf(paper)
   if (assignee) sendMessage({ journal: paper.journal, paperId, recipient: userName(assignee) ?? 'Production', channel: 'email', template: 'Returned to production' })
@@ -244,6 +252,7 @@ export async function searchBackdatable(query: string, journals: JournalCode[]):
     .slice(0, 8)
     .map((paper): BackdateMatch => {
       if (PUBLISHED_STATUSES.includes(paper.status) || paper.status === 'indexed') return { paper, eligible: false, reason: 'Already published. Use Post-publication changes to amend a live article.' }
+      if (backdatedFinal.has(paper.id) && paper.status === 'in_production') return { paper, eligible: false, reason: 'Already in production as a backdated item.' }
       if (paper.status === 'ready_for_approval') return { paper, eligible: false, reason: backdatedFinal.has(paper.id) ? 'Already sent to final approval as a backdated item.' : 'Already waiting in final approval.' }
       return { paper, eligible: true }
     })
@@ -256,6 +265,16 @@ export function listPastIssues(journal: JournalCode): Issue[] {
 
 export function nextBackdatedSeq(journal: JournalCode) {
   return pstore().backdatedSeq[journal]
+}
+
+/** Backdated items still in the production stage, for the Associate Editor (own items only). */
+export async function listBackdatedInProduction(journals: JournalCode[], onlyAssignedTo?: string): Promise<(BackdatedItem & { paper: Paper })[]> {
+  const rows = pstore().backdated
+    .filter((b) => journals.includes(b.journal) && b.status !== 'published')
+    .map((b) => ({ ...b, paper: store().papers.find((p) => p.id === b.finalId) }))
+    .filter((b): b is BackdatedItem & { paper: Paper } => !!b.paper && IN_PRESS_STATUSES.includes(b.paper.status))
+    .filter((b) => !onlyAssignedTo || assigneeOf(b.paper) === onlyAssignedTo)
+  return delay(rows)
 }
 
 export async function listBackdated(journals: JournalCode[]): Promise<BackdatedItem[]> {
@@ -305,14 +324,18 @@ export async function submitBackdated(input: BackdateInput): Promise<BackdatedIt
     renamePaper(paper.id, finalId)
     logEvent(finalId, `was assigned the backdated ID ${finalId}`, `Original ID ${paper.id} was unavailable.`)
   }
-  updatePaper(finalId, { status: 'ready_for_approval', assigneeId: productionAssigneeFor(paper.journal) }, {
-    event: `Moved to final approval as a backdated item for ${issue.label}`, audit: 'Backdated publication submitted',
+  // production step: the Associate Editor of the journal completes it, then sends it to final approval
+  const assignee = productionAssigneeFor(paper.journal)
+  updatePaper(finalId, { status: 'in_production', assigneeId: assignee, productionDue: addDays(new Date(), 5).toISOString() }, {
+    event: `Moved to production as a backdated item for ${issue.label}`,
+    note: assignee ? `Assigned to ${userName(assignee) ?? 'the Associate Editor'}.` : 'No Associate Editor is assigned to this journal yet; assign one in User Management.',
+    audit: 'Backdated publication moved to production',
   })
   ensureRecord(finalId)
   const item: BackdatedItem = {
     id: `bd-${finalId}`, journal: paper.journal, originalId: paper.id, finalId, generatedId: input.generateId, title: input.title.trim(),
     originalStatus: originalStatus.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase()), issueId: issue.id, issueLabel: issue.label, issueDate: issue.publicationDate,
-    createdAt: new Date().toISOString(), createdBy: currentActor(), note: input.acceptNote, status: 'pending_approval',
+    createdAt: new Date().toISOString(), createdBy: currentActor(), note: input.acceptNote, status: 'in_production', unassigned: !assignee,
   }
   pstore().patch({ backdated: [item, ...pstore().backdated] })
   recordAudit({ journal: paper.journal, action: 'Backdated publication', target: finalId, oldValue: paper.id, newValue: `${issue.label} (${issue.publicationDate})` })
