@@ -88,6 +88,14 @@ export const useSession = create<SessionState>()(
       toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
       setFlag: (k, v) => set((s) => ({ flags: { ...s.flags, [k]: v } })),
     }),
-    { name: 'journal-admin-session', version: 1 },
+    {
+      name: 'journal-admin-session',
+      version: 2,
+      migrate: (persisted) => ({ ...(persisted as object), flags: DEFAULT_FLAGS }),
+      merge: (persisted, current) => {
+        const p = (persisted ?? {}) as Partial<SessionState>
+        return { ...current, ...p, flags: { ...current.flags, ...(p.flags ?? {}) } }
+      },
+    },
   ),
 )

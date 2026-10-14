@@ -114,7 +114,7 @@ function InvoiceView({ row, onChanged, onOpenNote }: { row: InvoiceRow; onChange
     <>
       <DocView doc={invoiceDoc(row)} name={row.invoiceNo} extra={row.creditNote
         ? <button className="btn-secondary" onClick={() => onOpenNote(row.creditNote!.id)}><FileText size={15} strokeWidth={1.5} aria-hidden /> View credit note {row.creditNote.id}</button>
-        : <GuardedButton className="btn-secondary" allowed={refundable && perm.can('approve')} why={perm.why('approve') ?? 'Only verified payments can be refunded.'} onClick={() => setRefunding(true)}><Undo2 size={15} strokeWidth={1.5} aria-hidden /> Refund & create credit note</GuardedButton>} />
+        : <GuardedButton className="btn-secondary" allowed={refundable && perm.can('manage')} why={perm.why('manage') ?? 'Only verified payments can be refunded.'} onClick={() => setRefunding(true)}><Undo2 size={15} strokeWidth={1.5} aria-hidden /> Refund & create credit note</GuardedButton>} />
       <ReasonDialog open={refunding} onClose={() => setRefunding(false)} danger confirmLabel="Refund & issue credit note" title="Create credit note"
         description={`Invoice ${row.invoiceNo} · ${formatMoney(row.payment.total, row.payment.currency)}`} label="Reason for the credit note"
         consequences={['The payment is refunded in full and marked Refunded.', 'A credit note is issued against this invoice with the tax reversed.', 'The author is emailed the credit note.']}

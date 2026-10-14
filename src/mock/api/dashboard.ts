@@ -1,18 +1,28 @@
 import { differenceInCalendarDays, isSameMonth, parseISO } from 'date-fns'
-import type { JournalCode, JournalScope, Paper, PaperStatus } from '@/shared/types'
+import type { ActivityEntry, JournalCode, JournalScope, MessageLogEntry, Paper, PaperStatus, Payment, Ticket, WhatsAppChat } from '@/shared/types'
 import { PIPELINE_STAGES } from '@/shared/statuses'
 import { computeGst } from '@/shared/gst'
 import { JOURNAL_CODES } from '../data/core'
 import { SCHOLAR_RATE } from '../data/ops'
 import { NOW, nextDispatch } from '../data/papers'
-import { useDataStore } from '../store'
+import { INBOX_UNREAD_SEED, TICKET_PRIORITIES } from '../data/dashboard'
+import type { BackdatedItem, ChangeRequest } from '../data/production'
+import type { ReviewRecord } from '../data/editorial'
+import { useDataStore, useSession } from '../store'
+import { useProductionStore } from '../stores/production'
+import { useEditorialStore } from '../stores/editorial'
+import { usePublishingStore } from '../stores/publishing'
 import { delay } from './latency'
 
 const inScope = (scope: JournalScope, allowed: JournalCode[]) => (j: JournalCode) =>
   scope === 'ALL' ? allowed.includes(j) : j === scope
 
 const count = (papers: Paper[], ...s: PaperStatus[]) => papers.filter((p) => s.includes(p.status)).length
+const avg = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0)
+const dueSoon = (iso?: string) => !!iso && differenceInCalendarDays(parseISO(iso), NOW) <= 0
+const byDue = (a: Paper, b: Paper, key: 'productionDue' | 'reviewDue') => (a[key] ?? '9').localeCompare(b[key] ?? '9')
 
+/* ---------- Super Admin ---------- */
 export interface AdminOverview {
   kpis: { newSubmissions: number; awaitingDecision: number; awaitingPayment: number; inProduction: number; readyToPublish: number; publishedThisMonth: number; revenueInr: number; revenueUsd: number }
   pipeline: { key: string; label: string; count: number }[]
@@ -46,7 +56,6 @@ export async function getAdminOverview(scope: JournalScope, allowed: JournalCode
     .sort((a, b) => a.updatedAt.localeCompare(b.updatedAt))
     .slice(0, 8)
     .map((paper) => ({ paper, action: actionFor[paper.status] ?? 'Review' }))
-  const rates = JOURNAL_CODES.filter(ok).map((j) => SCHOLAR_RATE[j])
   return delay({
     kpis: {
       newSubmissions: papers.filter((p) => differenceInCalendarDays(NOW, parseISO(p.submittedAt)) <= 7).length,
@@ -72,27 +81,140 @@ export async function getAdminOverview(scope: JournalScope, allowed: JournalCode
     }),
     dispatch: { count: dispatchItems.length, at: nextDispatch().toISOString(), items: dispatchItems },
     needsAction,
-    scholarRate: rates.length ? rates.reduce((a, b) => a + b, 0) / rates.length : 0,
+    scholarRate: avg(JOURNAL_CODES.filter(ok).map((j) => SCHOLAR_RATE[j])),
   })
 }
 
-export const getRecentActivity = (scope: JournalScope, allowed: JournalCode[]) => {
+export const getRecentActivity = (scope: JournalScope, allowed: JournalCode[]): Promise<ActivityEntry[]> => {
   const ok = inScope(scope, allowed)
   return delay(useDataStore.getState().activity.filter((a) => ok(a.journal)).slice(0, 8))
 }
 
-export const getMyProductionQueue = (userId: string, scope: JournalScope) =>
-  delay(useDataStore.getState().papers.filter((p) => p.assigneeId === userId && (scope === 'ALL' || p.journal === scope)))
+/* ---------- Editor ---------- */
+export interface EditorOverview {
+  pipeline: { key: string; label: string; count: number }[]
+  decisions: Paper[]
+  payments: { payment: Payment; paper?: Paper }[]
+  ready: Paper[]
+  corrections: ChangeRequest[]
+  scholarRate: number
+  total: number
+}
 
-export const getMyReviews = (userId: string, scope: JournalScope) =>
-  delay(useDataStore.getState().papers.filter((p) => p.reviewerId === userId && (scope === 'ALL' || p.journal === scope)))
+export async function getEditorOverview(scope: JournalScope, allowed: JournalCode[]): Promise<EditorOverview> {
+  const ok = inScope(scope, allowed)
+  const { papers, payments } = useDataStore.getState()
+  const mine = papers.filter((p) => ok(p.journal))
+  return delay({
+    pipeline: PIPELINE_STAGES.map((s) => ({ key: s.key, label: s.label, count: count(mine, ...s.statuses) })),
+    decisions: mine.filter((p) => p.status === 'decision_pending').sort((a, b) => a.updatedAt.localeCompare(b.updatedAt)),
+    payments: payments.filter((x) => ok(x.journal) && x.status === 'pending_verification').map((payment) => ({ payment, paper: papers.find((p) => p.id === payment.paperId) })),
+    ready: mine.filter((p) => p.status === 'ready_for_approval'),
+    corrections: useProductionStore.getState().changeRequests.filter((c) => ok(c.journal) && ['requested', 'under_review', 'version_review'].includes(c.status)),
+    scholarRate: avg(JOURNAL_CODES.filter(ok).map((j) => SCHOLAR_RATE[j])),
+    total: mine.length,
+  })
+}
 
-export async function getSupportOverview(scope: JournalScope, allowed: JournalCode[]) {
+/* ---------- Associate Editor ---------- */
+export interface AssociateOverview {
+  assigned: Paper[]
+  stages: { status: PaperStatus; label: string; count: number }[]
+  returned: { paper: Paper; note?: { text: string; by: string; at: string } }[]
+  due: Paper[]
+  backdated: BackdatedItem[]
+  conference: { paper: Paper; conference: string }[]
+  corrections: ChangeRequest[]
+  inPress: number
+}
+
+const AE_STAGES: { status: PaperStatus; label: string }[] = [
+  { status: 'paid', label: 'Paid, to start' },
+  { status: 'in_production', label: 'In production' },
+  { status: 'returned_to_production', label: 'Returned' },
+  { status: 'ready_for_approval', label: 'Sent for approval' },
+]
+
+export async function getAssociateOverview(userId: string, scope: JournalScope, allowed: JournalCode[]): Promise<AssociateOverview> {
+  const ok = inScope(scope, allowed)
+  const all = useDataStore.getState().papers
+  const assigned = all.filter((p) => p.assigneeId === userId && ok(p.journal))
+  const prod = useProductionStore.getState()
+  const confs = usePublishingStore.getState()
+  const confName = (paperId: string) => confs.conferences.find((x) => (confs.links[x.id] ?? []).includes(paperId))?.shortName
+  return delay({
+    assigned,
+    stages: AE_STAGES.map((s) => ({ ...s, count: count(assigned, s.status) })),
+    returned: assigned.filter((p) => p.status === 'returned_to_production').map((paper) => ({ paper, note: prod.records[paper.id]?.returnNote })),
+    due: assigned.filter((p) => p.status !== 'ready_for_approval' && dueSoon(p.productionDue)).sort((a, b) => byDue(a, b, 'productionDue')),
+    backdated: prod.backdated.filter((b) => ok(b.journal) && b.status === 'pending_approval'),
+    conference: assigned.flatMap((paper) => { const c = confName(paper.id); return c ? [{ paper, conference: c }] : [] }),
+    corrections: prod.changeRequests.filter((c) => ok(c.journal) && c.assigneeId === userId && c.status === 'ready'),
+    inPress: all.filter((p) => ok(p.journal) && ['in_production', 'returned_to_production', 'ready_for_approval'].includes(p.status)).length,
+  })
+}
+
+/* ---------- Reviewer / Review Panel Member ---------- */
+export interface ReviewerOverview {
+  assigned: Paper[]
+  completed: ReviewRecord[]
+  blogDrafts: number
+}
+
+const blogMods = import.meta.glob('/src/mock/stores/blog.ts', { eager: true }) as Record<string, Record<string, unknown>>
+
+/** Counts this user's draft posts when the blog store exists (built by another package); 0 otherwise. */
+function blogDraftCount(userId: string, name: string): number {
+  const mod = Object.values(blogMods)[0]
+  if (!mod) return 0
+  for (const v of Object.values(mod)) {
+    const store = v as { getState?: () => { posts?: unknown } } | undefined
+    const posts = typeof store?.getState === 'function' ? store.getState().posts : undefined
+    if (Array.isArray(posts)) {
+      return (posts as { status?: string; authorId?: string; author?: string }[]).filter((p) => p.status === 'draft' && (p.authorId === userId || p.author === name)).length
+    }
+  }
+  return 0
+}
+
+export async function getReviewerOverview(userId: string, scope: JournalScope, allowed: JournalCode[]): Promise<ReviewerOverview> {
+  const ok = inScope(scope, allowed)
+  const { papers, users } = useDataStore.getState()
+  const name = users.find((u) => u.id === userId)?.name ?? ''
+  return delay({
+    assigned: papers.filter((p) => p.reviewerId === userId && ok(p.journal)).sort((a, b) => byDue(a, b, 'reviewDue')),
+    completed: useEditorialStore.getState().reviews.filter((r) => r.reviewerId === userId && ok(r.journal)).sort((a, b) => b.submittedAt.localeCompare(a.submittedAt)),
+    blogDrafts: blogDraftCount(userId, name),
+  })
+}
+
+/* ---------- Support Executive ---------- */
+export interface SupportOverview {
+  openTickets: Ticket[]
+  byPriority: { priority: (typeof TICKET_PRIORITIES)[number]; count: number }[]
+  unreadChats: WhatsAppChat[]
+  unread: { whatsapp: number; email: number | null; chat: number | null }
+  corrections: ChangeRequest[]
+  failedMessages: MessageLogEntry[]
+}
+
+export async function getSupportOverview(scope: JournalScope, allowed: JournalCode[], userName: string): Promise<SupportOverview> {
   const ok = inScope(scope, allowed)
   const { tickets, chats, messages } = useDataStore.getState()
+  const flags = useSession.getState().flags
+  const openTickets = tickets.filter((t) => ok(t.journal) && t.status !== 'resolved').sort((a, b) => a.dueAt.localeCompare(b.dueAt))
+  const unreadChats = chats.filter((c) => ok(c.journal) && c.unread > 0)
+  const seeded = (k: 'email' | 'chat') => JOURNAL_CODES.filter(ok).reduce((n, j) => n + INBOX_UNREAD_SEED[k][j], 0)
   return delay({
-    openTickets: tickets.filter((t) => ok(t.journal) && t.status !== 'resolved'),
-    unreadChats: chats.filter((c) => ok(c.journal) && c.unread > 0),
+    openTickets,
+    byPriority: TICKET_PRIORITIES.map((priority) => ({ priority, count: openTickets.filter((t) => t.priority === priority).length })),
+    unreadChats,
+    unread: {
+      whatsapp: unreadChats.reduce((n, c) => n + c.unread, 0),
+      email: flags.emailInbox ? seeded('email') : null,
+      chat: flags.websiteChat ? seeded('chat') : null,
+    },
+    corrections: useProductionStore.getState().changeRequests.filter((c) => ok(c.journal) && c.requestedBy === userName),
     failedMessages: messages.filter((m) => ok(m.journal) && m.status === 'failed'),
   })
 }

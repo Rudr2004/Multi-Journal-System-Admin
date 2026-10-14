@@ -21,11 +21,18 @@ import { conferenceStatus } from '@/mock/data/publishing'
 import { journalByCode } from '@/mock/data/core'
 import { formatDate } from '@/shared/formatters'
 import type { Paper } from '@/shared/types'
+import { ConferenceProductionDetail } from './ConferenceProduction'
 import { ConferenceFields, conferenceSchema, toFormValues, toInput } from './conferenceForm'
 import { ImageField, IssueStatusBadge, type ImageValue } from './parts'
 
 export function ConferenceEditorPage() {
   const { conferenceId = '' } = useParams()
+  const perm = usePermission('conferences')
+  if (!perm.can('manage')) return <ConferenceProductionDetail conferenceId={conferenceId} />
+  return <ConferenceEditorLoader conferenceId={conferenceId} />
+}
+
+function ConferenceEditorLoader({ conferenceId }: { conferenceId: string }) {
   const r = useAsync(() => getConference(conferenceId), [conferenceId])
   if (r.error) return <><PageHeader title="Conference not found" crumbs={[{ label: conferenceId }]} /><div className="card"><ErrorState message="We could not load this conference." onRetry={r.reload} /></div></>
   if (!r.data) return <><PageHeader title="Loading conference…" crumbs={[{ label: conferenceId }]} /><div className="grid gap-5 lg:grid-cols-5"><Skeleton className="h-96 lg:col-span-3" /><Skeleton className="h-96 lg:col-span-2" /></div></>
