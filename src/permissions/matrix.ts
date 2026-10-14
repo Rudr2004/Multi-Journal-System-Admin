@@ -19,11 +19,12 @@ export const LEVEL_LABEL: Record<Level, string> = {
 }
 
 export type Area =
-  | 'dashboard' | 'submissions' | 'reviewMgmt' | 'myReviews' | 'production' | 'finalApproval'
+  | 'dashboard' | 'submissions' | 'reviewMgmt' | 'myReviews' | 'reviewAssign' | 'production' | 'finalApproval'
   | 'backdated' | 'postPub' | 'issues' | 'conferences' | 'doi' | 'certificates'
   | 'payments' | 'invoices' | 'referrals'
-  | 'dispatch' | 'commLog' | 'templates' | 'whatsapp' | 'helpdesk' | 'chatbot'
-  | 'cms' | 'board' | 'announcements' | 'awards' | 'awardApproval' | 'forms'
+  | 'dispatch' | 'commLog' | 'templates' | 'notifications' | 'whatsapp' | 'inbox' | 'helpdesk' | 'chatbot'
+  | 'cms' | 'blog' | 'board' | 'announcements' | 'awards' | 'awardApproval' | 'forms'
+  | 'journalMetrics' | 'newsletter'
   | 'analytics' | 'scholar'
   | 'users' | 'journalSettings' | 'audit'
 
@@ -33,39 +34,53 @@ const W: Level = 'work'
 const A: Level = 'approve'
 const M: Level = 'manage'
 
-// Columns: Super Admin, Editor, Associate Editor, Reviewer, Panel Member, Support
-// NOTE: derived from the role descriptions in the brief; reconcile with the architecture PDF §9 when shared.
+// Columns: Super Admin, Editor, Associate Editor, Reviewer, Panel Member, Support Executive
+// Source: Architecture v1.3 sections 8 (menus), 9 (responsibilities) and 10 (permission matrix). Super Admin is NOT an Editor:
+// the Super Admin keeps oversight (read-only paper lookup, award approval) but has no editorial workflow modules. A role gets 'none' for every module
+// that is not on its menu in the sheet, so nothing leaks into its navigation or routes.
 type Row = [Level, Level, Level, Level, Level, Level]
 const TABLE: Record<Area, Row> = {
   dashboard: [M, M, W, W, W, W],
-  submissions: [M, A, W, N, N, V],
-  reviewMgmt: [M, M, N, N, N, N],
-  myReviews: [N, N, N, W, W, N],
-  production: [M, V, W, N, N, N],
-  finalApproval: [A, A, N, N, N, N],
-  backdated: [M, M, N, N, N, N],
-  postPub: [M, A, W, N, N, W],
-  issues: [M, M, V, N, N, N],
-  conferences: [M, M, V, N, N, N],
-  doi: [M, M, V, N, N, N],
-  certificates: [M, M, W, N, N, N],
-  payments: [M, A, N, N, N, V],
-  invoices: [M, V, N, N, N, V],
-  referrals: [M, V, N, N, N, N],
-  dispatch: [M, M, V, N, N, V],
-  commLog: [M, M, V, N, N, W],
-  templates: [M, V, N, N, N, N],
-  whatsapp: [M, V, N, N, N, M],
-  helpdesk: [M, V, N, N, N, M],
-  chatbot: [M, N, N, N, N, V],
-  cms: [M, M, N, N, N, N],
+  // Editorial
+  submissions: [V, M, W, N, N, V], // Manuscript Submissions (Editor) / Assigned Manuscripts (AE, assigned only)
+  reviewMgmt: [N, M, N, N, N, N],
+  myReviews: [N, N, N, W, W, N], // Review Submissions (Reviewer) / Review Assignments (Panel Member)
+  reviewAssign: [N, N, N, V, N, N], // Reviewer: read-only list of external review assignments
+  production: [N, V, W, N, N, N],
+  finalApproval: [N, A, N, N, N, N], // publish / Return to Production
+  backdated: [N, M, W, N, N, N], // AE = production step only
+  postPub: [N, A, W, N, N, W], // Support raises, Editor approves, AE edits
+  conferences: [M, M, W, N, N, N], // Conference Management / Conference Proceedings
+  scholar: [N, M, N, N, N, N],
+  awards: [V, M, N, N, N, N],
+  awardApproval: [A, N, N, N, N, N],
+  // Publishing (Super Admin: Journal & Issue Management)
+  issues: [M, M, N, N, N, N],
+  doi: [M, N, N, N, N, N],
+  certificates: [M, N, W, N, N, N],
+  // Finance
+  payments: [M, A, N, N, N, N], // Editor verifies payments inside Manuscript Submissions
+  invoices: [M, V, N, N, N, N],
+  referrals: [M, N, N, N, N, N],
+  // Communication
+  notifications: [M, N, N, N, N, N], // Notification Management (author messages, schedule, staff alerts)
+  templates: [M, N, N, N, N, N],
+  dispatch: [M, N, N, N, N, N],
+  commLog: [M, N, N, N, N, N],
+  inbox: [N, N, N, N, N, M], // Communication Inbox (Chat / Mail / WA)
+  whatsapp: [N, N, N, N, N, M],
+  helpdesk: [N, N, N, N, N, M], // Ticket Management
+  chatbot: [N, N, N, N, N, N],
+  newsletter: [M, N, N, N, N, N],
+  // Website
+  cms: [M, M, N, N, N, N], // Page Management
+  blog: [M, A, N, W, N, N], // Blog & Resources (Reviewer drafts, Editor approves)
   board: [M, M, N, N, N, N],
   announcements: [M, M, N, N, N, N],
-  awards: [M, M, N, N, N, N],
-  awardApproval: [A, N, N, N, N, N],
   forms: [M, M, N, N, N, N],
-  analytics: [M, V, N, N, N, N],
-  scholar: [M, V, N, N, N, N],
+  journalMetrics: [M, N, N, N, N, N],
+  // Insights & administration
+  analytics: [M, N, N, N, N, N],
   users: [M, N, N, N, N, N],
   journalSettings: [M, N, N, N, N, N],
   audit: [M, N, N, N, N, N],

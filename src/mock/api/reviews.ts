@@ -2,7 +2,7 @@ import type { JournalCode, Paper, StaffUser } from '@/shared/types'
 import { formatDate } from '@/shared/formatters'
 import { logEvent, recordAudit, sendMessage, updatePaper } from '../actions'
 import {
-  abstractFor, candidatesFor, keywordsFor, paperSubjects, recommendationMeta, reviewerKindOf, userName, wordCountFor,
+  EXPERTISE, matchScore, abstractFor, candidatesFor, keywordsFor, paperSubjects, recommendationMeta, reviewerKindOf, userName, wordCountFor,
   type FileVersion, type Recommendation, type ReminderState, type ReviewDraft, type ReviewRecord, type ReviewScores, type ReviewerKind,
 } from '../data/editorial'
 import { useDataStore, useSession } from '../store'
@@ -113,11 +113,17 @@ export interface MyReviewRow {
   hasDraft: boolean
 }
 
+/** Who the paper is assigned to: the shared seed's reviewer, or an external panel member mapped at read time. */
+export function reviewerOf(p: Paper): string | undefined {
+  const panel = useEditorialStore.getState().panelOverrides[p.id]
+  return panel && p.status !== 'screening' ? panel : p.reviewerId
+}
+
 export function listMyReviews(userId: string, journals: JournalCode[]) {
   const { papers } = useDataStore.getState()
   const { reviews, drafts } = useEditorialStore.getState()
   const rows = papers
-    .filter((p) => p.reviewerId === userId && journals.includes(p.journal))
+    .filter((p) => reviewerOf(p) === userId && journals.includes(p.journal))
     .map<MyReviewRow>((paper) => ({
       paper,
       submitted: reviews.filter((r) => r.paperId === paper.id && r.reviewerId === userId).sort((a, b) => b.submittedAt.localeCompare(a.submittedAt))[0],
@@ -159,7 +165,7 @@ export interface ReviewWorkspace {
 export async function getReviewWorkspace(paperId: string, userId: string, journals: JournalCode[]): Promise<ReviewWorkspace> {
   await delay(null)
   const p = useDataStore.getState().papers.find((x) => x.id === paperId)
-  if (!p || p.reviewerId !== userId || !journals.includes(p.journal)) throw new ApiError('This paper is not assigned to you.', 'forbidden')
+  if (!p || reviewerOf(p) !== userId || !journals.includes(p.journal)) throw new ApiError('This paper is not assigned to you.', 'forbidden')
   const { reviews, drafts, files } = useEditorialStore.getState()
   const user = findUser(userId)
   return {
@@ -188,7 +194,7 @@ export async function submitReview(paperId: string, userId: string, values: Revi
   await delay(null, 500, 900)
   const p = rawPaper(paperId)
   const user = findUser(userId)
-  if (!user || p.reviewerId !== userId) throw new ApiError('This paper is not assigned to you.', 'forbidden')
+  if (!user || reviewerOf(p) !== userId) throw new ApiError('This paper is not assigned to you.', 'forbidden')
   const { reviews, drafts, patch } = useEditorialStore.getState()
   const record: ReviewRecord = {
     id: `rev-${paperId}-${Date.now().toString(36)}`, paperId, journal: p.journal, reviewerId: userId, reviewerName: user.name,
@@ -204,4 +210,71 @@ export async function submitReview(paperId: string, userId: string, values: Revi
   })
   recordAudit({ journal: p.journal, action: 'Review submitted', target: paperId, oldValue: p.status, newValue: moved ? 'decision_pending' : p.status })
   return record
+}
+
+/* ------------------------------------------------------------------ */
+/* Reviewer: read-only views                                            */
+/* ------------------------------------------------------------------ */
+export type PanelAssignmentStatus = 'assigned' | 'in_review' | 'submitted'
+
+export interface ReviewAssignmentRow {
+  paperId: string
+  journal: JournalCode
+  title: string
+  subjects: string[]
+  panelMemberId: string
+  panelMemberName: string
+  status: PanelAssignmentStatus
+  due?: string
+  reminders: ReminderState
+}
+
+const DAY = 86_400_000
+
+/** Papers the Editor assigned to external Review Panel Members in the reviewer's journals. No author identity. */
+export async function listReviewAssignments(journals: JournalCode[]): Promise<ReviewAssignmentRow[]> {
+  await delay(null)
+  const { papers, users } = useDataStore.getState()
+  const { reviews, drafts, reminders } = useEditorialStore.getState()
+  const rows: ReviewAssignmentRow[] = []
+  for (const p of papers) {
+    const rid = reviewerOf(p)
+    const member = rid ? users.find((u) => u.id === rid) : undefined
+    if (!member || reviewerKindOf(member, p.journal) !== 'panel' || !journals.includes(p.journal)) continue
+    const submitted = reviews.some((r) => r.paperId === p.id && r.reviewerId === member.id)
+    const started = !!drafts[draftKey(p.id, member.id)] || (reminders[p.id]?.count ?? 0) > 0
+    const status: PanelAssignmentStatus = submitted || !['screening', 'under_review'].includes(p.status) ? 'submitted' : p.status === 'under_review' && started ? 'in_review' : 'assigned'
+    rows.push({
+      paperId: p.id, journal: p.journal, title: p.title, subjects: paperSubjects(p), panelMemberId: member.id, panelMemberName: member.name, status,
+      due: p.reviewDue ?? new Date(new Date(p.submittedAt).getTime() + 21 * DAY).toISOString(), reminders: reminders[p.id] ?? { count: 0 },
+    })
+  }
+  const rank: Record<PanelAssignmentStatus, number> = { assigned: 0, in_review: 1, submitted: 2 }
+  return rows.sort((a, b) => rank[a.status] - rank[b.status] || (a.due ?? '').localeCompare(b.due ?? ''))
+}
+
+export interface SubjectSubmissionRow {
+  paperId: string
+  journal: JournalCode
+  title: string
+  articleType: string
+  status: Paper['status']
+  submittedAt: string
+  subjects: string[]
+  matched: string[]
+}
+
+/** Read-only list of submissions in the reviewer's journals that match their expertise. Behind the reviewerSeesAll flag. */
+export async function listSubjectSubmissions(userId: string, journals: JournalCode[]): Promise<SubjectSubmissionRow[]> {
+  await delay(null)
+  if (!useSession.getState().flags.reviewerSeesAll) return []
+  const expertise = EXPERTISE[userId] ?? []
+  return useDataStore.getState().papers
+    .filter((p) => journals.includes(p.journal))
+    .map((p) => ({ p, m: matchScore(paperSubjects(p), expertise) }))
+    .filter((x) => x.m.matched.length > 0)
+    .map<SubjectSubmissionRow>(({ p, m }) => ({
+      paperId: p.id, journal: p.journal, title: p.title, articleType: p.articleType, status: p.status, submittedAt: p.submittedAt, subjects: paperSubjects(p), matched: m.matched,
+    }))
+    .sort((a, b) => b.submittedAt.localeCompare(a.submittedAt))
 }

@@ -566,3 +566,25 @@ export function buildEditorialSeed(papers: Paper[]): EditorialSeed {
   }
   return { reviews, decisions, history, files, reminders }
 }
+
+/* ------------------------------------------------------------------ */
+/* External Review Panel assignments (additive, applied at read time)   */
+/* ------------------------------------------------------------------ */
+/**
+ * The shared papers seed only points IJECM papers at the panel member. So the reviewer's read-only
+ * "Review Assignments" list is populated, a few papers that fall outside the in-house reviewer's expertise
+ * (and a couple still in screening) are treated as assigned to the external panel member u-panel-2.
+ * Read through `panelOverrideFor` in the reviews API; the shared seed is never edited.
+ */
+export const PANEL_MEMBER_FOR_OVERRIDES = 'u-panel-2'
+
+export function buildPanelOverrides(papers: Paper[]): Record<string, string> {
+  const out: Record<string, string> = {}
+  const ij = papers.filter((p) => p.journal === 'IJMAT')
+  const live = ij.filter((p) => (p.status === 'under_review' || p.status === 'decision_pending') && p.reviewerId === 'u-reviewer')
+  const outside = live.filter((p) => matchScore(paperSubjects(p), EXPERTISE['u-reviewer']).score < 50)
+  const chosen = (outside.length >= 2 ? outside : [...outside, ...live.filter((p) => !outside.includes(p))]).slice(0, 3)
+  for (const p of chosen) out[p.id] = PANEL_MEMBER_FOR_OVERRIDES
+  for (const p of ij.filter((x) => x.status === 'screening' && !x.reviewerId).slice(0, 2)) out[p.id] = PANEL_MEMBER_FOR_OVERRIDES
+  return out
+}
