@@ -3,13 +3,13 @@ import { ROLE_META } from '@/permissions/roles'
 import { JOURNAL_CODES, DEMO_USER_LABELS } from '../data/core'
 import { recordAudit, sendMessage, currentActor } from '../actions'
 import { useDataStore } from '../store'
-import { useAdminStore, type InviteMeta } from '../stores/admin'
+import { useAdminStore, syncExpertise, type InviteMeta } from '../stores/admin'
 import { activityForUser } from './audit'
 import { ApiError, delay } from './latency'
 
 export type Assignments = Partial<Record<JournalCode, Role>>
 
-/** "IJMAT: Journal Editor" lines used in audit entries and the UI. */
+/** "IJMAT: Editor" lines used in audit entries and the UI. */
 export function assignmentLines(a: Assignments): string {
   const lines = JOURNAL_CODES.filter((c) => a[c]).map((c) => `${c}: ${ROLE_META[a[c]!].label}`)
   return lines.length ? lines.join('\n') : 'No access'
@@ -23,11 +23,13 @@ const activeSupers = (users: StaffUser[]) => users.filter((u) => u.status === 'a
 export interface UserRow extends StaffUser {
   lastActive?: string
   invite?: InviteMeta
+  /** Subject expertise (Reviewers and Review Panel Members). */
+  expertise: string[]
 }
 
 const decorate = (u: StaffUser): UserRow => {
-  const { lastActive, invites } = useAdminStore.getState()
-  return { ...u, lastActive: lastActive[u.id], invite: invites[u.id] }
+  const { lastActive, invites, expertise } = useAdminStore.getState()
+  return { ...u, lastActive: lastActive[u.id], invite: invites[u.id], expertise: expertise[u.id] ?? [] }
 }
 
 export async function listUsers(): Promise<UserRow[]> {
@@ -47,7 +49,10 @@ const rand = () => Math.random().toString(36).slice(2, 10) + Math.random().toStr
 const basePath = () => import.meta.env.BASE_URL.replace(/\/$/, '')
 export const setPasswordLink = (token: string) => `${window.location.origin}${basePath()}/set-password?token=${token}`
 
-export interface InviteInput { name: string; email: string; title: string; assignments: Assignments }
+export interface InviteInput { name: string; email: string; title: string; assignments: Assignments; expertise?: string[] }
+
+/** Roles that carry subject expertise for reviewer matching. */
+export const hasExpertiseRole = (a: Assignments) => Object.values(a).some((r) => r === 'reviewer' || r === 'panel_member')
 
 export async function inviteUser(input: InviteInput): Promise<{ user: StaffUser; link: string }> {
   await delay(null, 500, 900)
@@ -72,6 +77,7 @@ export async function inviteUser(input: InviteInput): Promise<{ user: StaffUser;
     invites: { ...admin.invites, [id]: { invitedAt: new Date().toISOString(), invitedBy: currentActor(), token, link } },
     addedLabels: [...admin.addedLabels, id],
   })
+  if (hasExpertiseRole(assignments) && input.expertise?.length) await setExpertiseNow(id, input.expertise, true)
   const first = Object.keys(assignments)[0] as JournalCode
   sendMessage({ journal: first, recipient: email, channel: 'email', template: 'Staff invitation' })
   recordAudit({ journal: Object.keys(assignments).length === 1 ? first : 'ALL', action: 'User invited', target: user.name, newValue: assignmentLines(assignments) })
@@ -138,4 +144,22 @@ export async function resendInvitation(id: string): Promise<{ link: string }> {
   sendMessage({ journal: first, recipient: u.email, channel: 'email', template: 'Staff invitation (reminder)' })
   recordAudit({ journal: 'ALL', action: 'User invitation resent', target: u.name })
   return { link: inv.link }
+}
+
+async function setExpertiseNow(id: string, tags: string[], silent = false) {
+  const admin = useAdminStore.getState()
+  const next = { ...admin.expertise, [id]: [...new Set(tags)].sort() }
+  admin.patch({ expertise: next })
+  syncExpertise(next)
+  const u = useDataStore.getState().users.find((x) => x.id === id)
+  if (!silent && u) recordAudit({ journal: 'ALL', action: 'Reviewer expertise changed', target: u.name, oldValue: (admin.expertise[id] ?? []).join(', ') || 'None', newValue: next[id].join(', ') || 'None' })
+}
+
+/** Save the subject/expertise tags used to match papers to this Reviewer or Review Panel Member. */
+export async function updateExpertise(id: string, tags: string[]): Promise<void> {
+  await delay(null, 250, 500)
+  const u = useDataStore.getState().users.find((x) => x.id === id)
+  if (!u) throw new ApiError('User not found.', 'not_found')
+  if (!hasExpertiseRole(u.assignments)) throw new ApiError('Expertise areas apply to Reviewers and Review Panel Members only.', 'invalid')
+  await setExpertiseNow(id, tags)
 }

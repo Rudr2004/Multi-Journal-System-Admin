@@ -1,6 +1,7 @@
 import type { PageDef } from '@/app/pageDef'
 import { MyReviewsPage } from './MyReviewsPage'
 import { PaperDetailPage } from './PaperDetailPage'
+import { ReviewAssignmentsPage } from './ReviewAssignmentsPage'
 import { ReviewManagementPage } from './ReviewManagementPage'
 import { ReviewWorkspacePage } from './ReviewWorkspacePage'
 import { SubmissionsPage } from './SubmissionsPage'
@@ -12,4 +13,5 @@ export const editorialPages: PageDef[] = [
   { path: '/review-management', area: 'reviewMgmt', element: <ReviewManagementPage /> },
   { path: '/my-reviews', area: 'myReviews', element: <MyReviewsPage /> },
   { path: '/my-reviews/:paperId', area: 'myReviews', element: <ReviewWorkspacePage /> },
+  { path: '/review-assignments', area: 'reviewAssign', element: <ReviewAssignmentsPage /> },
 ]

@@ -1,5 +1,5 @@
 import type { JournalCode, Paper, WhatsAppChat } from '@/shared/types'
-import { newId, recordAudit, sendMessage } from '../actions'
+import { currentActor, newId, recordAudit, sendMessage } from '../actions'
 import type { ChatMessage, ChatMeta } from '../data/communication'
 import { useDataStore } from '../store'
 import { useCommStore } from '../stores/communication'
@@ -61,7 +61,7 @@ export async function sendChatMessage(chatId: string, text: string, opts: { temp
   if (!chat) return delay(false)
   const { threads, patch } = useCommStore.getState()
   const now = new Date().toISOString()
-  const msg: ChatMessage = { id: newId('wm'), direction: 'out', text, at: now, by: useDataStore.getState().users.find((u) => u.id === 'u-support')?.name, template: !!opts.template }
+  const msg: ChatMessage = { id: newId('wm'), direction: 'out', text, at: now, by: currentActor(), template: !!opts.template }
   patch({ threads: { ...threads, [chatId]: [...(threads[chatId] ?? []), msg] } })
   patchChat(chatId, { lastMessage: text, lastAt: now })
   sendMessage({ journal: chat.journal, paperId: chat.paperId, recipient: chat.contact, channel: 'whatsapp', template: opts.template ?? 'Inbox reply (free-form)', status: 'sent' })

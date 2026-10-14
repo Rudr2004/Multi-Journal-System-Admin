@@ -1,5 +1,4 @@
 import { Link } from 'react-router-dom'
-import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip as ChartTip, XAxis, YAxis } from 'recharts'
 import { BadgeCheck, CircleDollarSign, Clock, Factory, FilePlus2, Gavel, Send, Wallet } from 'lucide-react'
 import { getAdminOverview, getRecentActivity } from '@/mock/api/dashboard'
 import { useSession } from '@/mock/store'
@@ -11,8 +10,7 @@ import { SectionCard } from '@/components/Card'
 import { JournalBadge } from '@/components/Badges'
 import { EmptyState, ErrorState } from '@/components/States'
 import { RelativeTime } from '@/components/Time'
-import { CHART_COLORS } from '@/styles/tokens'
-import { PaperTable, TD, TH, TableSkeleton } from './parts'
+import { PaperTable, ScholarCard, StageChart, TD, TH, TableSkeleton } from './parts'
 
 export function AdminDashboard() {
   const scope = useSession((s) => s.journal)
@@ -29,8 +27,8 @@ export function AdminDashboard() {
         <KpiCard label="New submissions (7 days)" value={k && formatNumber(k.newSubmissions)} icon={FilePlus2} loading={loading} to="/submissions" />
         <KpiCard label="Awaiting decision" value={k && formatNumber(k.awaitingDecision)} icon={Gavel} loading={loading} tone="warning" to="/submissions" />
         <KpiCard label="Awaiting payment" value={k && formatNumber(k.awaitingPayment)} icon={Wallet} loading={loading} to="/payments" />
-        <KpiCard label="In production" value={k && formatNumber(k.inProduction)} icon={Factory} loading={loading} to="/production" />
-        <KpiCard label="Ready to publish" value={k && formatNumber(k.readyToPublish)} icon={BadgeCheck} loading={loading} to="/final-approval" />
+        <KpiCard label="In production" value={k && formatNumber(k.inProduction)} icon={Factory} loading={loading} />
+        <KpiCard label="Ready to publish" value={k && formatNumber(k.readyToPublish)} icon={BadgeCheck} loading={loading} />
         <KpiCard label="Published this month" value={k && formatNumber(k.publishedThisMonth)} icon={Clock} loading={loading} />
         <KpiCard label="Revenue (INR, incl. GST)" value={k && formatMoney(k.revenueInr, 'INR')} icon={CircleDollarSign} loading={loading} to="/payments" />
         <KpiCard label="Revenue (USD)" value={k && formatMoney(k.revenueUsd, 'USD')} icon={CircleDollarSign} loading={loading} to="/payments" />
@@ -65,19 +63,7 @@ export function AdminDashboard() {
       <div className="grid gap-6 xl:grid-cols-3">
         <SectionCard title="Pipeline by stage" className="xl:col-span-2">
           {overview.error ? <ErrorState onRetry={overview.reload} /> : loading ? <div className="h-[240px] animate-pulse rounded-md bg-slate-100" /> : (
-            <figure aria-label={`Papers per stage: ${o!.pipeline.map((p) => `${p.label} ${p.count}`).join(', ')}`}>
-              <div className="h-[240px]" role="img" aria-label="Bar chart of papers per pipeline stage">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={o!.pipeline} margin={{ top: 16, right: 8, left: -16, bottom: 0 }}>
-                    <CartesianGrid vertical={false} stroke="#E2E8F0" />
-                    <XAxis dataKey="label" tickLine={false} axisLine={false} tick={{ fontSize: 12, fill: '#475569' }} />
-                    <YAxis allowDecimals={false} tickLine={false} axisLine={false} tick={{ fontSize: 12, fill: '#475569' }} />
-                    <ChartTip cursor={{ fill: '#F1F5F9' }} contentStyle={{ borderRadius: 8, border: '1px solid #E2E8F0', fontSize: 12 }} formatter={(v) => [v, 'Papers']} />
-                    <Bar dataKey="count" fill={CHART_COLORS[0]} radius={[4, 4, 0, 0]} maxBarSize={48} label={{ position: 'top', fontSize: 12, fill: '#0F172A' }} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            </figure>
+            <StageChart data={o!.pipeline} />
           )}
         </SectionCard>
 
@@ -113,18 +99,10 @@ export function AdminDashboard() {
 
         <div className="space-y-6">
           <SectionCard title="Google Scholar indexing">
-            {loading ? <div className="h-12 animate-pulse rounded bg-slate-100" /> : (
-              <>
-                <div className="text-3xl font-semibold tracking-tight">{formatPercent(o!.scholarRate)}</div>
-                <p className="mt-1 text-sm text-muted">of published articles are indexed{scope === 'ALL' ? ' (average across journals)' : ''}.</p>
-                <div className="mt-3 h-2 overflow-hidden rounded-full bg-subtle" role="progressbar" aria-valuenow={Math.round(o!.scholarRate)} aria-valuemin={0} aria-valuemax={100} aria-label="Scholar indexing rate">
-                  <div className="h-full rounded-full bg-accent" style={{ width: `${o!.scholarRate}%` }} />
-                </div>
-              </>
-            )}
+            <ScholarCard rate={o?.scholarRate} loading={loading} all={scope === 'ALL'} />
           </SectionCard>
           <SectionCard title="Recent activity" flush>
-            {activity.loading ? <TableSkeleton rows={4} /> : (
+            {activity.error ? <ErrorState onRetry={activity.reload} /> : activity.loading ? <TableSkeleton rows={4} /> : activity.data!.length === 0 ? <EmptyState title="No activity yet" /> : (
               <ul className="divide-y divide-line">
                 {activity.data!.slice(0, 6).map((a) => (
                   <li key={a.id} className="px-4 py-2.5 text-sm">

@@ -18,8 +18,9 @@ export function MessageStatusBadge({ status }: { status: MessageStatus }) {
   return <Badge tone={STATUS_TONE[status]} className="capitalize">{status}</Badge>
 }
 
-export function PaperLink({ id }: { id?: string }) {
+export function PaperLink({ id, plain }: { id?: string; plain?: boolean }) {
   if (!id) return <span className="text-faint">—</span>
+  if (plain) return <span className="whitespace-nowrap font-medium">{id}</span>
   return <Link to={`/submissions/${id}`} className="whitespace-nowrap font-medium text-accent hover:underline">{id}</Link>
 }
 

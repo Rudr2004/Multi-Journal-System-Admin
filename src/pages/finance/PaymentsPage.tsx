@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { BadgeCheck, CheckCircle2, CircleDollarSign, Clock, Mail, Undo2, UserCheck, XCircle } from 'lucide-react'
+import { BadgeCheck, CheckCircle2, CircleDollarSign, Clock, Download, Mail, Undo2, UserCheck, XCircle } from 'lucide-react'
 import { PageHeader } from '@/layout/PageHeader'
 import { DataTable, SelectFilter, type Column } from '@/components/DataTable'
 import { Badge, JournalBadge } from '@/components/Badges'
@@ -20,13 +20,18 @@ import {
   assignProduction, eligibleAssociateEditors, isOffline, listPayments, refundPayment, rejectPayment, verifyPayment, type PaymentRow, type VerifyResult,
 } from '@/mock/api/payments'
 import { useDataStore } from '@/mock/store'
+import { recordAudit } from '@/mock/actions'
+import { downloadCsv } from '@/pages/insights/csv'
 import { formatDate, formatDateTime, formatMoney } from '@/shared/formatters'
 import { METHOD_LABEL, PAYMENT_STATUS, PaymentStatusBadge } from './parts'
 
 export function PaymentsPage() {
   const journals = useScopeJournals()
   const all = useIsAllJournals()
-  const [f, setF] = useState({ status: '', method: '', currency: '', from: '', to: '' })
+  const perm = usePermission('payments')
+  const finance = perm.can('manage') // Super Admin: refunds, credit notes and exports. The Editor only verifies / rejects.
+  const EMPTY = { status: '', method: '', currency: '', from: '', to: '' }
+  const [f, setF] = useState({ ...EMPTY, status: finance ? '' : 'pending_verification' })
   const [openId, setOpenId] = useState<string | null>(null)
   const r = useAsync(() => listPayments(journals), [journals.join()])
 
@@ -40,6 +45,15 @@ export function PaymentsPage() {
   const sum = (cur: 'INR' | 'USD') => (r.data ?? []).filter((p) => p.currency === cur && ['verified', 'verified_auto'].includes(p.status)).reduce((a, p) => a + p.total, 0)
   const pending = (r.data ?? []).filter((p) => p.status === 'pending_verification').length
   const loadingFirst = r.loading && !r.data
+
+  const exportCsv = () => {
+    recordAudit({ journal: 'ALL', action: 'Exported payments (CSV)', target: 'Payments & Invoices', newValue: `${rows.length} rows` })
+    downloadCsv(`payments-${new Date().toISOString().slice(0, 10)}.csv`, [
+      ['Payment', 'Paper ID', 'Journal', 'Payer', 'Method', 'Reference', 'Currency', 'Base', 'CGST', 'SGST', 'IGST', 'Total', 'Status', 'Invoice', 'Created'],
+      ...rows.map((p) => [p.id, p.paperId, p.journal, p.payer, METHOD_LABEL[p.method], p.reference, p.currency, p.base, p.cgst, p.sgst, p.igst, p.total, PAYMENT_STATUS[p.status].label, p.invoiceNo ?? '', p.createdAt.slice(0, 10)]),
+    ])
+    toast.success(`Exported ${rows.length} payment${rows.length === 1 ? '' : 's'} to CSV.`)
+  }
 
   const columns: Column<PaymentRow>[] = [
     { id: 'id', header: 'Payment', locked: true, sort: (p) => p.id, cell: (p) => <span className="whitespace-nowrap font-medium">{p.id}</span> },
@@ -69,12 +83,13 @@ export function PaymentsPage() {
 
   return (
     <>
-      <PageHeader title="Payments" description="Online payments are verified automatically. Offline UPI and bank-transfer proofs wait here for an editor to verify or reject." />
+      <PageHeader title="Payments" description="Online payments are verified automatically. Offline UPI and bank-transfer proofs wait here for the Editor to verify or reject."
+        actions={finance ? <button className="btn-secondary" disabled={rows.length === 0} onClick={exportCsv}><Download size={15} strokeWidth={1.5} aria-hidden /> Export CSV</button> : undefined} />
       <section aria-label="Payment summary" className="mb-5 grid grid-cols-2 gap-4 md:grid-cols-4">
         <KpiCard label="Awaiting verification" value={pending} icon={Clock} tone={pending ? 'warning' : 'default'} loading={loadingFirst} hint="Offline proofs to check" />
         <KpiCard label="Collected (INR, incl. GST)" value={formatMoney(sum('INR'), 'INR')} icon={CircleDollarSign} loading={loadingFirst} />
         <KpiCard label="Collected (USD)" value={formatMoney(sum('USD'), 'USD')} icon={CircleDollarSign} loading={loadingFirst} />
-        <KpiCard label="Refunded" value={(r.data ?? []).filter((p) => p.status === 'refunded').length} icon={Undo2} loading={loadingFirst} hint="Each has a credit note" />
+        <KpiCard label="Refunded" value={(r.data ?? []).filter((p) => p.status === 'refunded').length} icon={Undo2} loading={loadingFirst} hint={finance ? 'Each has a credit note' : undefined} />
       </section>
 
       <DataTable id="payments" data={rows} columns={columns} rowKey={(p) => p.id} loading={loadingFirst} error={!!r.error} onRetry={r.reload}
@@ -87,7 +102,7 @@ export function PaymentsPage() {
           <SelectFilter label="Currency" value={f.currency} onChange={set('currency')} options={[{ value: 'INR', label: 'INR (₹)' }, { value: 'USD', label: 'USD ($)' }]} />
           <label className="flex items-center gap-1.5 text-xs text-muted">From<input type="date" aria-label="From date" className="input !w-auto" value={f.from} max={f.to || undefined} onChange={(e) => set('from')(e.target.value)} /></label>
           <label className="flex items-center gap-1.5 text-xs text-muted">To<input type="date" aria-label="To date" className="input !w-auto" value={f.to} min={f.from || undefined} onChange={(e) => set('to')(e.target.value)} /></label>
-          {Object.values(f).some(Boolean) && <button className="btn-ghost" onClick={() => setF({ status: '', method: '', currency: '', from: '', to: '' })}>Clear filters</button>}
+          {(finance ? Object.values(f).some(Boolean) : JSON.stringify(f) !== JSON.stringify({ ...EMPTY, status: 'pending_verification' })) && <button className="btn-ghost" onClick={() => setF(EMPTY)}>{finance ? 'Clear filters' : 'Show all payments'}</button>}
         </>}
         rowClassName={(p) => (p.status === 'pending_verification' ? 'bg-amber-50/40' : undefined)}
         empty={{ icon: CircleDollarSign, title: 'No payments match', hint: 'Adjust the filters or the date range to see more payments.' }} />
@@ -173,10 +188,10 @@ function PaymentDetail({ row: p, onChanged }: { row: PaymentRow; onChanged: () =
           <GuardedButton className="btn-primary" allowed={canApprove} why={perm.why('approve')} disabled={busy} onClick={() => setConfirmVerify(true)}><CheckCircle2 size={15} strokeWidth={1.5} aria-hidden /> {busy ? 'Verifying…' : 'Verify payment'}</GuardedButton>
           <GuardedButton className="btn-danger" allowed={canApprove} why={perm.why('approve')} disabled={busy} onClick={() => setRejecting(true)}><XCircle size={15} strokeWidth={1.5} aria-hidden /> Reject proof</GuardedButton>
         </>)}
-        {(p.status === 'verified' || p.status === 'verified_auto') && (
-          <GuardedButton className="btn-secondary" allowed={canApprove} why={perm.why('approve')} onClick={() => setRefunding(true)}><Undo2 size={15} strokeWidth={1.5} aria-hidden /> Refund…</GuardedButton>
+        {(p.status === 'verified' || p.status === 'verified_auto') && perm.can('manage') && (
+          <GuardedButton className="btn-secondary" allowed={perm.can('manage')} why={perm.why('manage')} onClick={() => setRefunding(true)}><Undo2 size={15} strokeWidth={1.5} aria-hidden /> Refund…</GuardedButton>
         )}
-        {!['pending_verification', 'verified', 'verified_auto'].includes(p.status) && <p className="text-sm text-muted">No actions available for a payment that is {PAYMENT_STATUS[p.status].label.toLowerCase()}.</p>}
+        {(!['pending_verification', 'verified', 'verified_auto'].includes(p.status) || (!perm.can('manage') && p.status !== 'pending_verification')) && <p className="text-sm text-muted">No actions available for a payment that is {PAYMENT_STATUS[p.status].label.toLowerCase()}.{!perm.can('manage') && (p.status === 'verified' || p.status === 'verified_auto') ? ' Refunds and credit notes are handled by the Super Admin.' : ''}</p>}
       </div>
 
       <ConfirmDialog open={confirmVerify} onClose={() => setConfirmVerify(false)} title="Verify this payment?" confirmLabel="Verify & send invoice"
@@ -232,7 +247,7 @@ function VerifySuccess({ result, assignedName, onAssigned }: { result: VerifyRes
             </div>
             <button className="btn-primary" disabled={!pick || saving} onClick={assign}>{saving ? 'Assigning…' : 'Assign'}</button>
           </div>
-          {options.length === 0 && <p className="text-xs">No active user holds the Associate Editor role. Add one in Users & roles.</p>}
+          {options.length === 0 && <p className="text-xs">No active user holds the Associate Editor role. Add one in User Management.</p>}
         </div>
       )}
     </div>

@@ -39,12 +39,23 @@ function applyIssueDemoSeed(conferences: ReturnType<typeof buildConferences>) {
   patch({ issues: [...next, ...buildProceedingsIssues(conferences, freed)] })
 }
 
+/** Links a few JIMRT papers that are in production to its conference, so the Associate Editor's conference view has work in it. */
+function withProductionPapers(links: Record<string, string[]>, conferences: ReturnType<typeof buildConferences>) {
+  const conf = conferences.find((c) => c.journal === 'JIMRT')
+  if (!conf) return links
+  const inProd = useDataStore.getState().papers
+    .filter((p) => p.journal === 'JIMRT' && ['in_production', 'returned_to_production', 'ready_for_approval'].includes(p.status))
+    .sort((x, y) => Number(y.assigneeId === 'u-ae') - Number(x.assigneeId === 'u-ae'))
+    .slice(0, 4).map((p) => p.id)
+  return { ...links, [conf.id]: [...new Set([...(links[conf.id] ?? []), ...inProd])] }
+}
+
 function seed() {
   const conferences = buildConferences()
   applyIssueDemoSeed(conferences)
   return {
     conferences,
-    links: buildConferenceLinks(useDataStore.getState().papers, conferences),
+    links: withProductionPapers(buildConferenceLinks(useDataStore.getState().papers, conferences), conferences),
     certs: {} as Record<string, CertificateRecord>,
     covers: {} as Record<string, CoverImage>,
   }

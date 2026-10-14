@@ -1,6 +1,6 @@
 import type { JournalCode } from '@/shared/types'
 import { currentActor, newId, recordAudit, sendMessage } from '../actions'
-import type { Announcement, AnnouncementType, Placement } from '../data/website'
+import type { Announcement, AnnouncementChannel, AnnouncementType, Placement } from '../data/website'
 import { useWebsiteStore } from '../stores/website'
 import { ApiError, delay } from './latency'
 
@@ -8,6 +8,9 @@ const wait = () => delay(null, 250, 600)
 const state = () => useWebsiteStore.getState()
 
 export interface AnnouncementInput {
+  channel: AnnouncementChannel
+  link: string
+  highlight: boolean
   title: string
   body: string
   type: AnnouncementType
@@ -33,7 +36,7 @@ export async function createAnnouncements(journals: JournalCode[], input: Announ
   state().set({ announcements: [...created, ...state().announcements] })
   const scheduled = new Date(input.startAt).getTime() > Date.now()
   for (const a of created) {
-    recordAudit({ journal: a.journal, action: scheduled ? 'Scheduled announcement' : 'Published announcement', target: a.title, newValue: input.startAt })
+    recordAudit({ journal: a.journal, action: `${scheduled ? 'Scheduled' : 'Published'} ${input.channel === 'tab' ? 'tab notification' : 'scrolling notification'} (announcement)`, target: a.title, newValue: input.startAt })
     if (a.emailSubscribers) sendMessage({ journal: a.journal, recipient: `${a.journal} subscribers`, channel: 'email', template: `Announcement: ${a.title}` })
   }
   return created

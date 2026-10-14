@@ -7,6 +7,7 @@ import { useScopeJournals } from '@/lib/scope'
 import { usePermission } from '@/permissions/hooks'
 import { useSession } from '@/mock/store'
 import { ROLE_META, ROLE_ORDER } from '@/permissions/roles'
+import { FLAG_META, ROLE_FLAG } from '@/permissions/flags'
 import { Badge } from '@/components/Badges'
 import { DataTable, SelectFilter, type Column } from '@/components/DataTable'
 import { ErrorState } from '@/components/States'
@@ -14,11 +15,11 @@ import { GuardedButton } from '@/components/Tooltip'
 import { RelativeTime } from '@/components/Time'
 import { initials } from '@/lib/utils'
 import { JOURNAL_CODES } from '@/mock/data/core'
-import { listUsers, type UserRow } from '@/mock/api/users'
+import { hasExpertiseRole, listUsers, type UserRow } from '@/mock/api/users'
 import { recordAudit } from '@/mock/actions'
 import { downloadCsv } from '@/pages/insights/csv'
 import { InviteDialog } from './InviteDialog'
-import { RoleChips, UserStatusBadge, userStatusLabel } from './userUi'
+import { ExpertiseChips, RoleChips, UserStatusBadge, userStatusLabel } from './userUi'
 
 export function UsersPage() {
   const perm = usePermission('users')
@@ -27,9 +28,9 @@ export function UsersPage() {
   const flags = useSession((s) => s.flags)
   const { data, loading, error, reload } = useAsync(() => listUsers(), [])
   const [inviteOpen, setInviteOpen] = useState(false)
-  const [journalF, setJournalF] = useState('')
-  const [roleF, setRoleF] = useState('')
-  const [statusF, setStatusF] = useState('')
+  const [f, setF] = useState({ journal: '', role: '', status: '' })
+  const { journal: journalF, role: roleF, status: statusF } = f
+  const set = (k: keyof typeof f) => (v: string) => setF((s) => ({ ...s, [k]: v }))
 
   const rows = useMemo(
     () =>
@@ -38,7 +39,7 @@ export function UsersPage() {
         const inScope = scope.length === JOURNAL_CODES.length || codes.length === 0 || codes.some((c) => scope.includes(c))
         if (!inScope) return false
         if (journalF && !u.assignments[journalF as keyof typeof u.assignments]) return false
-        if (roleF && !Object.values(u.assignments).includes(roleF as never)) return false
+        if (roleF && !(journalF ? u.assignments[journalF as keyof typeof u.assignments] === roleF : Object.values(u.assignments).includes(roleF as never))) return false
         if (statusF && userStatusLabel(u).label !== statusF) return false
         return true
       }),
@@ -59,6 +60,7 @@ export function UsersPage() {
       ),
     },
     { id: 'roles', header: 'Journals & roles', cell: (u) => <RoleChips assignments={u.assignments} /> },
+    { id: 'expertise', header: 'Expertise areas', cell: (u) => (hasExpertiseRole(u.assignments) ? <ExpertiseChips tags={u.expertise} max={3} /> : <span className="text-muted">—</span>) },
     { id: 'status', header: 'Status', sort: (u) => userStatusLabel(u).label, cell: (u) => <UserStatusBadge user={u} /> },
     { id: 'active', header: 'Last active', sort: (u) => u.lastActive, cell: (u) => (u.lastActive ? <RelativeTime value={u.lastActive} /> : <span className="text-muted">Never</span>) },
     {
@@ -70,17 +72,17 @@ export function UsersPage() {
   ]
 
   const exportCsv = () => {
-    recordAudit({ journal: 'ALL', action: 'Exported users (CSV)', target: 'Users & roles', newValue: `${rows.length} rows` })
+    recordAudit({ journal: 'ALL', action: 'Exported users (CSV)', target: 'User Management', newValue: `${rows.length} rows` })
     downloadCsv('users.csv', [
-      ['Name', 'Email', 'Title', 'Status', '2-step', 'Assignments'],
-      ...rows.map((u) => [u.name, u.email, u.title, userStatusLabel(u).label, u.twoStep ? 'On' : 'Off', JOURNAL_CODES.filter((c) => u.assignments[c]).map((c) => `${c}: ${ROLE_META[u.assignments[c]!].label}`).join('; ')]),
+      ['Name', 'Email', 'Title', 'Status', '2-step', 'Assignments', 'Expertise areas'],
+      ...rows.map((u) => [u.name, u.email, u.title, userStatusLabel(u).label, u.twoStep ? 'On' : 'Off', JOURNAL_CODES.filter((c) => u.assignments[c]).map((c) => `${c}: ${ROLE_META[u.assignments[c]!].label}`).join('; '), u.expertise.join('; ')]),
     ])
   }
 
   return (
     <>
       <PageHeader
-        title="Users & roles"
+        title="User Management"
         description="Staff accounts and the role each person holds in every journal."
         actions={
           <GuardedButton allowed={perm.can('manage')} why={perm.why('manage')} className="btn-primary" onClick={() => setInviteOpen(true)}>
@@ -94,12 +96,13 @@ export function UsersPage() {
         <DataTable<UserRow>
           id="users" data={rows} columns={columns} rowKey={(u) => u.id} loading={loading} pageSize={10}
           onRowClick={(u) => navigate(`/users/${u.id}`)}
-          search={{ placeholder: 'Search name or email', text: (u) => `${u.name} ${u.email} ${u.title}` }}
+          search={{ placeholder: 'Search name, email or expertise', text: (u) => `${u.name} ${u.email} ${u.title} ${u.expertise.join(' ')}` }}
+          views={{ filters: f, applyFilters: (x) => setF(x as typeof f) }}
           filters={
             <>
-              <SelectFilter label="Journal" value={journalF} onChange={setJournalF} options={JOURNAL_CODES.map((c) => ({ value: c, label: c }))} />
-              <SelectFilter label="Role" value={roleF} onChange={setRoleF} options={ROLE_ORDER.filter((r) => r !== 'panel_member' || flags.reviewPanel).map((r) => ({ value: r, label: ROLE_META[r].label }))} />
-              <SelectFilter label="Status" value={statusF} onChange={setStatusF} options={['Active', 'Invitation pending', 'Suspended', 'Deactivated'].map((s) => ({ value: s, label: s }))} />
+              <SelectFilter label="Journal" value={journalF} onChange={set('journal')} options={JOURNAL_CODES.map((c) => ({ value: c, label: c }))} />
+              <SelectFilter label="Role" value={roleF} onChange={set('role')} options={ROLE_ORDER.filter((r) => !ROLE_FLAG[r] || flags[ROLE_FLAG[r]!]).map((r) => ({ value: r, label: ROLE_FLAG[r] ? `${ROLE_META[r].label} (${FLAG_META[ROLE_FLAG[r]!].badge})` : ROLE_META[r].label }))} />
+              <SelectFilter label="Status" value={statusF} onChange={set('status')} options={['Active', 'Invitation pending', 'Suspended', 'Deactivated'].map((s) => ({ value: s, label: s }))} />
             </>
           }
           toolbarRight={<button className="btn-secondary" onClick={exportCsv}><Download size={15} strokeWidth={1.5} aria-hidden /> Export</button>}

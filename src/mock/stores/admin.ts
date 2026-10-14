@@ -3,6 +3,7 @@ import type { JournalCode } from '@/shared/types'
 import { DEMO_USER_LABELS } from '../data/core'
 import { NOW } from '../data/papers'
 import { SEED_LAST_ACTIVE_HOURS, buildJournalSettings, restoreJournalIdentity, type JournalSettings } from '../data/settings'
+import { EXPERTISE } from '../data/editorial'
 import { registerReset } from '../reset'
 import { useSession } from '../store'
 
@@ -15,6 +16,14 @@ export interface InviteMeta {
   acceptedAt?: string
 }
 
+const SEED_EXPERTISE: Record<string, string[]> = Object.fromEntries(Object.entries(EXPERTISE).map(([k, v]) => [k, [...v]]))
+const seedExpertise = () => Object.fromEntries(Object.entries(SEED_EXPERTISE).map(([k, v]) => [k, [...v]])) as Record<string, string[]>
+/** Keep the editorial matching table in step with the admin store. */
+export function syncExpertise(map: Record<string, string[]>) {
+  for (const k of Object.keys(EXPERTISE)) delete EXPERTISE[k]
+  for (const [k, v] of Object.entries(map)) EXPERTISE[k] = [...v]
+}
+
 const seedLastActive = () =>
   Object.fromEntries(Object.entries(SEED_LAST_ACTIVE_HOURS).map(([id, h]) => [id, new Date(NOW.getTime() - h * 3_600_000).toISOString()])) as Record<string, string>
 
@@ -24,6 +33,8 @@ interface AdminState {
   /** Users whose access was reset (password + 2-step re-enrolment required). */
   accessReset: Record<string, string>
   journalSettings: Record<JournalCode, JournalSettings>
+  /** Subject / expertise tags per Reviewer and Review Panel Member (feeds reviewer matching). */
+  expertise: Record<string, string[]>
   /** Demo-login chips added for invited users, so reset can remove them. */
   addedLabels: string[]
   patch: (p: Partial<Omit<AdminState, 'patch' | 'reset'>>) => void
@@ -35,12 +46,14 @@ export const useAdminStore = create<AdminState>((set, get) => ({
   lastActive: seedLastActive(),
   accessReset: {},
   journalSettings: buildJournalSettings(),
+  expertise: seedExpertise(),
   addedLabels: [],
   patch: (p) => set(p),
   reset: () => {
     for (const id of get().addedLabels) delete DEMO_USER_LABELS[id]
     restoreJournalIdentity()
-    set({ invites: {}, lastActive: seedLastActive(), accessReset: {}, journalSettings: buildJournalSettings(), addedLabels: [] })
+    syncExpertise(SEED_EXPERTISE)
+    set({ expertise: seedExpertise(), invites: {}, lastActive: seedLastActive(), accessReset: {}, journalSettings: buildJournalSettings(), addedLabels: [] })
   },
 }))
 

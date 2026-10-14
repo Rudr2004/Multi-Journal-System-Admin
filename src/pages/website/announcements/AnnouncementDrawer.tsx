@@ -11,18 +11,24 @@ import { cn } from '@/lib/utils'
 import { useJournals } from '@/permissions/hooks'
 import { formatDateTime } from '@/shared/formatters'
 import type { JournalCode } from '@/shared/types'
-import { ANNOUNCEMENT_TYPES, PLACEMENTS, type Announcement } from '@/mock/data/website'
+import { journalByCode } from '@/mock/data/core'
+import { ANNOUNCEMENT_TYPES, announcementStatus, type Announcement, type AnnouncementChannel } from '@/mock/data/website'
+import { useWebsiteStore } from '@/mock/stores/website'
 import { createAnnouncements, updateAnnouncement, type AnnouncementInput } from '@/mock/api/announcements'
 import { fromLocalInput, toLocalInput } from '../shared'
+import { AnnouncementPreview } from './AnnouncementPreview'
 
-const makeSchema = (isEdit: boolean) =>
+const urlOk = (v: string) => v === '' || /^https?:\/\/[^\s/]+\.[^\s]+$/i.test(v)
+
+const makeSchema = (isEdit: boolean, channel: AnnouncementChannel) =>
   z
     .object({
       journals: z.array(z.string()),
-      title: z.string().trim().min(5, 'Enter a headline of at least 5 characters.').max(120, 'Keep the headline under 120 characters.'),
-      body: z.string().trim().min(20, 'Write at least a sentence (20 characters).').max(600, 'Keep the text under 600 characters.'),
+      title: z.string().trim().min(5, 'Enter the notification text (at least 5 characters).').max(channel === 'scrolling' ? 140 : 200, `Keep the text under ${channel === 'scrolling' ? 140 : 200} characters.`),
+      body: z.string().trim().max(300, 'Keep the detail under 300 characters.'),
+      link: z.string().trim().refine(urlOk, 'Enter a full link starting with https://'),
       type: z.enum(ANNOUNCEMENT_TYPES),
-      placements: z.array(z.enum(['banner', 'topbar', 'page'])).min(1, 'Choose at least one place to show it.'),
+      highlight: z.boolean(),
       pinned: z.boolean(),
       mode: z.enum(['now', 'schedule']),
       startAt: z.string(),
@@ -47,30 +53,34 @@ const makeSchema = (isEdit: boolean) =>
 
 type Values = z.infer<ReturnType<typeof makeSchema>>
 
-export function AnnouncementDrawer({ open, onClose, announcement, onSaved }: { open: boolean; onClose: () => void; announcement?: Announcement; onSaved: () => void }) {
+export function AnnouncementDrawer({ open, onClose, announcement, channel, onSaved }: { open: boolean; onClose: () => void; announcement?: Announcement; channel: AnnouncementChannel; onSaved: () => void }) {
+  const ch = announcement?.channel ?? channel
+  const noun = ch === 'scrolling' ? 'scrolling notification' : 'tab notification'
   return (
-    <Drawer open={open} onClose={onClose} title={announcement ? 'Edit announcement' : 'New announcement'} width={600}>
-      {open && <Body key={announcement?.id ?? 'new'} announcement={announcement} onClose={onClose} onSaved={onSaved} />}
+    <Drawer open={open} onClose={onClose} title={announcement ? `Edit ${noun}` : `New ${noun}`} width={620}>
+      {open && <Body key={announcement?.id ?? 'new'} announcement={announcement} channel={ch} onClose={onClose} onSaved={onSaved} />}
     </Drawer>
   )
 }
 
-function Body({ announcement, onClose, onSaved }: { announcement?: Announcement; onClose: () => void; onSaved: () => void }) {
+function Body({ announcement, channel, onClose, onSaved }: { announcement?: Announcement; channel: AnnouncementChannel; onClose: () => void; onSaved: () => void }) {
   const isEdit = !!announcement
   const allowed = useJournals()
   const scope = useScopeJournals()
-  const schema = useMemo(() => makeSchema(isEdit), [isEdit])
+  const all = useWebsiteStore((s) => s.announcements)
+  const schema = useMemo(() => makeSchema(isEdit, channel), [isEdit, channel])
   const { register, control, handleSubmit, watch, setValue, formState: { errors, isSubmitting } } = useForm<Values>({
     resolver: zodResolver(schema),
     defaultValues: announcement
-      ? { journals: [announcement.journal], title: announcement.title, body: announcement.body, type: announcement.type, placements: announcement.placements, pinned: announcement.pinned, mode: 'schedule', startAt: toLocalInput(announcement.startAt), hasEnd: !!announcement.endAt, endAt: announcement.endAt ? toLocalInput(announcement.endAt) : '', emailSubscribers: announcement.emailSubscribers }
-      : { journals: scope.length === 1 ? scope : [], title: '', body: '', type: 'News', placements: ['page'], pinned: false, mode: 'now', startAt: '', hasEnd: false, endAt: '', emailSubscribers: false },
+      ? { journals: [announcement.journal], title: announcement.title, body: announcement.body, link: announcement.link, type: announcement.type, highlight: announcement.highlight, pinned: announcement.pinned, mode: 'schedule', startAt: toLocalInput(announcement.startAt), hasEnd: !!announcement.endAt, endAt: announcement.endAt ? toLocalInput(announcement.endAt) : '', emailSubscribers: announcement.emailSubscribers }
+      : { journals: scope.length === 1 ? scope : [], title: '', body: '', link: '', type: 'News', highlight: false, pinned: false, mode: 'now', startAt: '', hasEnd: false, endAt: '', emailSubscribers: false },
   })
   const v = watch()
   const [pending, setPending] = useState<Values | null>(null)
 
   const toInput = (x: Values): AnnouncementInput => ({
-    title: x.title.trim(), body: x.body.trim(), type: x.type, placements: x.placements, pinned: x.pinned,
+    channel, link: x.link.trim(), highlight: x.highlight,
+    title: x.title.trim(), body: channel === 'tab' ? x.body.trim() : '', type: x.type, placements: channel === 'scrolling' ? ['topbar'] : ['page'], pinned: x.pinned,
     startAt: x.mode === 'now' ? new Date().toISOString() : fromLocalInput(x.startAt),
     endAt: x.hasEnd ? fromLocalInput(x.endAt) : undefined, emailSubscribers: x.emailSubscribers,
   })
@@ -79,11 +89,11 @@ function Body({ announcement, onClose, onSaved }: { announcement?: Announcement;
     try {
       if (announcement) {
         await updateAnnouncement(announcement.id, toInput(x))
-        toast.success('Announcement updated.')
+        toast.success('Notification updated.')
       } else {
         const made = await createAnnouncements(x.journals as JournalCode[], toInput(x))
         const names = x.journals.join(' and ')
-        toast.success(x.mode === 'schedule' ? `Scheduled for ${names}: ${made.length} ${made.length === 1 ? 'announcement' : 'announcements'} created.` : `Published to ${names}.`)
+        toast.success(x.mode === 'schedule' ? `Scheduled for ${names}: ${made.length} ${made.length === 1 ? 'record' : 'records'} created.` : `Published to ${names}.`)
       }
       onSaved()
       onClose()
@@ -94,11 +104,25 @@ function Body({ announcement, onClose, onSaved }: { announcement?: Announcement;
   const submit = handleSubmit((x) => (isEdit && announcement && new Date(announcement.startAt) <= new Date() ? perform(x) : setPending(x)))
 
   const toggleIn = (arr: string[], id: string) => (arr.includes(id) ? arr.filter((x) => x !== id) : [...arr, id])
+  const previewJournal = (announcement?.journal ?? (v.journals[0] as JournalCode | undefined) ?? scope[0] ?? allowed[0]) as JournalCode
+  const others = useMemo(
+    () => all
+      .filter((a) => a.journal === previewJournal && a.channel === channel && a.id !== announcement?.id && announcementStatus(a) === 'live')
+      .slice(0, 2)
+      .map((a) => ({ text: a.title, detail: a.body, link: a.link, type: a.type, highlight: a.highlight, pinned: a.pinned })),
+    [all, previewJournal, channel, announcement?.id],
+  )
   const journalsLabel = v.journals.length ? v.journals.join(', ') : 'selected journals'
   const live = !isEdit && v.mode === 'now'
+  const where = channel === 'scrolling' ? 'the scrolling strip on every page' : 'the Notices tab on the home page'
 
   return (
     <form onSubmit={submit} noValidate className="space-y-5">
+      <div className="sticky top-0 z-10 -mx-5 -mt-5 border-b border-line bg-surface px-5 py-3">
+        <AnnouncementPreview channel={channel} journalName={previewJournal ? journalByCode(previewJournal).domain : 'journal website'} others={others}
+          current={{ text: v.title, detail: channel === 'tab' ? v.body : undefined, link: v.link, type: v.type, highlight: v.highlight, pinned: v.pinned }} />
+      </div>
+
       {isEdit ? (
         <p className="text-sm text-muted">Journal: <span className="font-medium text-ink">{announcement.journal}</span>. Posts made to several journals are separate records, so each is edited on its own.</p>
       ) : (
@@ -117,33 +141,27 @@ function Body({ announcement, onClose, onSaved }: { announcement?: Announcement;
             )} />
           </div>
           {errors.journals && <p role="alert" className="mt-1 text-xs text-red-600">{errors.journals.message}</p>}
-          {v.journals.length > 1 && <p className="mt-1 text-xs text-muted">One announcement is created for each of the {v.journals.length} journals. Each can be edited or ended separately afterwards.</p>}
+          {v.journals.length > 1 && <p className="mt-1 text-xs text-muted">One notification is created for each of the {v.journals.length} journals. Each can be edited or ended separately afterwards.</p>}
         </fieldset>
       )}
 
       <FormField label="Type" required>{(a) => <select {...a} {...register('type')} className="input">{ANNOUNCEMENT_TYPES.map((t) => <option key={t}>{t}</option>)}</select>}</FormField>
-      <FormField label="Headline" required error={errors.title?.message}>
-        {(a) => <div><input {...a} {...register('title')} className="input" placeholder="Call for papers: Volume 4, Issue 1" /><div className="mt-1 text-right"><CharCount value={v.title} max={120} /></div></div>}
+      <FormField label="Notification text" required error={errors.title?.message}>
+        {(a) => <div><input {...a} {...register('title')} className="input" placeholder="Call for papers: Volume 4, Issue 1 (submit by 20 December)" /><div className="mt-1 text-right"><CharCount value={v.title} max={channel === 'scrolling' ? 140 : 200} /></div></div>}
       </FormField>
-      <FormField label="Text" required error={errors.body?.message}>
-        {(a) => <div><textarea {...a} {...register('body')} rows={4} className="input !h-auto py-2" /><div className="mt-1 text-right"><CharCount value={v.body} max={600} /></div></div>}
+      {channel === 'tab' && (
+        <FormField label="More detail (optional)" error={errors.body?.message} hint="Shown in smaller text under the notice.">
+          {(a) => <div><textarea {...a} {...register('body')} rows={3} className="input !h-auto py-2" /><div className="mt-1 text-right"><CharCount value={v.body} max={300} /></div></div>}
+        </FormField>
+      )}
+      <FormField label="Link (optional)" error={errors.link?.message} hint="Adds a Read more link to the notice.">
+        {(a) => <input {...a} type="url" inputMode="url" {...register('link')} className="input" placeholder="https://" />}
       </FormField>
 
-      <fieldset>
-        <legend className="label">Show on <span className="text-red-600" aria-hidden>*</span></legend>
-        <Controller control={control} name="placements" render={({ field }) => (
-          <div className="flex flex-wrap gap-2">
-            {PLACEMENTS.map((p) => (
-              <label key={p.id} className={cn('inline-flex cursor-pointer items-center gap-2 rounded-md border px-3 py-1.5 text-sm', field.value.includes(p.id) ? 'border-accent bg-accent-soft text-accent' : 'border-line hover:bg-subtle')}>
-                <input type="checkbox" className="accent-indigo-600" checked={field.value.includes(p.id)} onChange={() => field.onChange(toggleIn(field.value, p.id))} /> {p.label}
-              </label>
-            ))}
-          </div>
-        )} />
-        {errors.placements && <p role="alert" className="mt-1 text-xs text-red-600">{errors.placements.message}</p>}
-      </fieldset>
-
-      <Switch label="Pin to the top" description="Pinned announcements stay above newer ones on the website." checked={v.pinned} onChange={(x) => setValue('pinned', x, { shouldDirty: true })} />
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Switch label="Highlight" description="Stands out in colour so readers notice it." checked={v.highlight} onChange={(x) => setValue('highlight', x, { shouldDirty: true })} />
+        <Switch label="Pin to the front" description="Pinned notices stay ahead of newer ones." checked={v.pinned} onChange={(x) => setValue('pinned', x, { shouldDirty: true })} />
+      </div>
 
       <fieldset className="space-y-3 rounded-lg border border-line p-3">
         <legend className="px-1 text-xs font-medium text-muted">Timing</legend>
@@ -165,8 +183,8 @@ function Body({ announcement, onClose, onSaved }: { announcement?: Announcement;
 
       <Switch label="Also email to subscribers" description="Sends one email to each selected journal's subscriber list when it goes live." checked={v.emailSubscribers} onChange={(x) => setValue('emailSubscribers', x, { shouldDirty: true })} />
       {v.emailSubscribers && (
-        <EmailPreview to={`${journalsLabel} subscribers`} subject={`[${v.journals[0] ?? announcement?.journal ?? 'Journal'}] ${v.title || 'Announcement headline'}`}
-          body={`Dear reader,\n\n${v.body || 'Your announcement text appears here.'}\n\n${v.type === 'Call for Papers' || v.type === 'Special Issue' ? 'Read the full details and submit your manuscript on our website.' : 'Visit our website for the latest news.'}\n\nWith regards,\nEditorial Office`} />
+        <EmailPreview to={`${journalsLabel} subscribers`} subject={`[${v.journals[0] ?? announcement?.journal ?? 'Journal'}] ${v.title || 'Notification text'}`}
+          body={`Dear reader,\n\n${v.title || 'Your notification text appears here.'}\n${v.body ? `\n${v.body}\n` : ''}\n${v.type === 'Call for Papers' || v.type === 'Special Issue' ? 'Read the full details and submit your manuscript on our website.' : 'Visit our website for the latest news.'}\n\nWith regards,\nEditorial Office`} />
       )}
 
       <div className="sticky bottom-0 -mx-5 -mb-5 flex justify-end gap-2 border-t border-line bg-surface px-5 py-3">
@@ -175,10 +193,10 @@ function Body({ announcement, onClose, onSaved }: { announcement?: Announcement;
       </div>
 
       <ConfirmDialog open={!!pending} onClose={() => setPending(null)} confirmLabel={pending?.mode === 'schedule' ? 'Schedule' : isEdit ? 'Save' : 'Publish now'}
-        title={pending?.mode === 'schedule' && !isEdit ? 'Schedule this announcement?' : isEdit ? 'Save changes to a scheduled announcement?' : 'Publish this announcement now?'}
+        title={pending?.mode === 'schedule' && !isEdit ? 'Schedule this notification?' : isEdit ? 'Save changes to a scheduled notification?' : 'Publish this notification now?'}
         consequences={[
-          live || pending?.mode === 'now' ? `Show it immediately on ${pending?.journals.join(', ')} (${pending?.placements.map((p) => PLACEMENTS.find((x) => x.id === p)?.label).join(', ')})` : `Go live on ${pending?.startAt ? formatDateTime(fromLocalInput(pending.startAt)) : ''} for ${pending?.journals.join(', ')}`,
-          pending && pending.journals.length > 1 ? `Create ${pending.journals.length} announcement records, one per journal` : 'Create one announcement record',
+          live || pending?.mode === 'now' ? `Show it immediately on ${pending?.journals.join(', ')} in ${where}` : `Go live on ${pending?.startAt ? formatDateTime(fromLocalInput(pending.startAt)) : ''} for ${pending?.journals.join(', ')}`,
+          pending && pending.journals.length > 1 ? `Create ${pending.journals.length} records, one per journal` : 'Create one record',
           ...(pending?.emailSubscribers ? [`Email each journal's subscribers when it goes live`] : []),
           'Record the change in the audit log',
         ]}

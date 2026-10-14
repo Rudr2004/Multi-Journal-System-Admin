@@ -1,22 +1,37 @@
 import { ChevronRight } from 'lucide-react'
 import { Link, useLocation } from 'react-router-dom'
-import { ALL_NAV_ITEMS, NAV_GROUPS } from '@/navigation/nav'
+import { resolveNav } from '@/navigation/nav'
+import { useRole } from '@/permissions/hooks'
 import { DraftLabel } from '@/components/States'
+import { Badge } from '@/components/Badges'
 
 interface Props {
   title: string
   description?: string
   actions?: React.ReactNode
-  /** Extra breadcrumb crumbs after the section, e.g. a paper ID. */
+  /** Extra breadcrumb crumbs after the module, e.g. a paper ID. */
   crumbs?: { label: string; to?: string }[]
   draft?: boolean
+  /** Extra badges, e.g. a feature flag's "Proposed". */
+  badges?: string[]
 }
 
-export function PageHeader({ title, description, actions, crumbs = [], draft }: Props) {
+/**
+ * Titles on a module's own page use the client's exact module name for the signed-in role
+ * (e.g. "Manuscript Submissions" for an Editor, "Assigned Manuscripts" for an Associate Editor).
+ */
+export function PageHeader({ title, description, actions, crumbs = [], draft, badges = [] }: Props) {
   const { pathname } = useLocation()
-  const item = ALL_NAV_ITEMS.find((n) => n.path === pathname) ?? ALL_NAV_ITEMS.find((n) => n.path !== '/' && pathname.startsWith(n.path))
-  const group = item && NAV_GROUPS.find((g) => g.items.includes(item))
-  const trail = [{ label: group?.label ?? 'Home' }, ...(item && item.path !== '/' ? [{ label: item.label, to: item.path }] : []), ...crumbs]
+  const role = useRole()
+  const { group, item, exact } = resolveNav(role, pathname)
+  const shownTitle = exact && item ? item.label : title
+  const trail = [
+    ...(group?.label ? [{ label: group.label }] : []),
+    ...(item && item.path !== '/' ? [{ label: item.label, to: item.path }] : [{ label: 'Home' }]),
+    ...(!exact && item && title !== item.label && crumbs.length === 0 ? [{ label: title }] : []),
+    ...crumbs,
+  ]
+  const allBadges = [...(exact && item?.badge ? [item.badge] : []), ...badges]
   return (
     <header className="mb-6 flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
       <div className="min-w-0">
@@ -24,13 +39,16 @@ export function PageHeader({ title, description, actions, crumbs = [], draft }: 
           {trail.map((c, i) => (
             <span key={i} className="inline-flex items-center gap-1">
               {i > 0 && <ChevronRight size={12} strokeWidth={1.5} aria-hidden />}
-              {c.to && i < trail.length - 1 ? <Link to={c.to} className="hover:text-ink hover:underline">{c.label}</Link> : <span aria-current={i === trail.length - 1 ? 'page' : undefined}>{c.label}</span>}
+              {'to' in c && c.to && i < trail.length - 1 ? <Link to={c.to} className="hover:text-ink hover:underline">{c.label}</Link> : <span aria-current={i === trail.length - 1 ? 'page' : undefined}>{c.label}</span>}
             </span>
           ))}
         </nav>
         <div className="flex flex-wrap items-center gap-3">
-          <h1 className="text-[22px] font-semibold leading-8 tracking-tight">{title}</h1>
+          <h1 className="text-[22px] font-semibold leading-8 tracking-tight">{shownTitle}</h1>
           {draft && <DraftLabel />}
+          {[...new Set(allBadges)].map((b) => (
+            <Badge key={b} tone={b === 'To confirm' ? 'warning' : b === 'Under discussion' ? 'info' : 'accent'}>{b}</Badge>
+          ))}
         </div>
         {description && <p className="mt-0.5 max-w-2xl text-sm text-muted">{description}</p>}
       </div>

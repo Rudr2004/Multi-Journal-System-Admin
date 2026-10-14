@@ -1,7 +1,6 @@
 import { NavLink } from 'react-router-dom'
 import { PanelLeftClose, PanelLeftOpen, X } from 'lucide-react'
-import { NAV_GROUPS } from '@/navigation/nav'
-import { levelFor } from '@/permissions/matrix'
+import { menuFor } from '@/navigation/nav'
 import { useCurrentUser, useRole } from '@/permissions/hooks'
 import { ROLE_META } from '@/permissions/roles'
 import { useSession } from '@/mock/store'
@@ -26,18 +25,18 @@ export function Logo({ compact, dark }: { compact?: boolean; dark?: boolean }) {
 
 function Nav({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?: () => void }) {
   const role = useRole()
-  const groups = NAV_GROUPS
-    .map((g) => ({ ...g, items: g.items.filter((i) => levelFor(role, i.area) !== 'none') }))
-    .filter((g) => g.items.length)
+  const groups = menuFor(role)
   return (
     <nav aria-label="Main" className="sidebar-scroll flex-1 overflow-y-auto px-3 pb-4">
       {groups.map((g) => (
-        <div key={g.label} className="mt-5 first:mt-2">
-          {!collapsed ? (
-            <div className="px-3 pb-1.5 text-[10.5px] font-semibold uppercase tracking-[0.12em] text-slate-500">{g.label}</div>
-          ) : (
-            <div className="mx-3 mb-2 border-t border-white/10" />
-          )}
+        <div key={g.label || 'main'} className="mt-5 first:mt-2">
+          {g.label ? (
+            !collapsed ? (
+              <div className="px-3 pb-1.5 text-[10.5px] font-semibold uppercase tracking-[0.12em] text-slate-500">{g.label}</div>
+            ) : (
+              <div className="mx-3 mb-2 border-t border-white/10" />
+            )
+          ) : null}
           <ul className="space-y-0.5">
             {g.items.map((item) => (
               <li key={item.path}>
@@ -54,13 +53,13 @@ function Nav({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?: () =>
                       isActive ? 'bg-white/10 text-white' : 'text-slate-300 hover:bg-white/5 hover:text-white',
                     )
                   }
-                  style={{ height: 'var(--control-h)' }}
+                  style={{ minHeight: 'var(--control-h)' }}
                 >
                   {({ isActive }) => (
                     <>
                       {isActive && <span aria-hidden className="absolute -left-3 top-1.5 bottom-1.5 w-[3px] rounded-r-full bg-indigo-400" />}
                       <item.icon size={17} strokeWidth={1.6} aria-hidden className={cn('shrink-0 transition-colors', isActive ? 'text-indigo-300' : 'text-slate-400 group-hover:text-slate-200')} />
-                      {!collapsed && <span className="truncate">{item.label}</span>}
+                      {!collapsed && <span className="min-w-0 py-1.5 leading-snug">{item.label}</span>}
                       {!collapsed && item.draft && <span className="ml-auto rounded-full bg-amber-400/15 px-1.5 py-px text-[10px] font-semibold text-amber-300">Draft</span>}
                     </>
                   )}

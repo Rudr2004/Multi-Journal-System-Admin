@@ -15,6 +15,8 @@ export interface ScholarRow {
   issueLabel: string
   indexed: boolean
   lastChecked: string
+  /** Mock Google Scholar result page for the article (only meaningful when indexed). */
+  resultUrl: string
 }
 
 export interface ScholarIssueRow {
@@ -57,6 +59,7 @@ export async function listScholarStatus(journals: JournalCode[]): Promise<Schola
       return {
         paperId: p.id, title: p.title, journal: p.journal, issueId: issue?.id, issueLabel: issue?.label ?? 'Not assigned to an issue',
         indexed, lastChecked: c?.checkedAt ?? seededCheckedAt(p, indexed),
+        resultUrl: `https://scholar.google.com/scholar?q=${encodeURIComponent(`"${p.title}"`)}`,
       }
     })
 
