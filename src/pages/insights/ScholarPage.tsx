@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { CheckCircle2, Clock, FileText, Percent, RefreshCw, SearchX } from 'lucide-react'
+import { CheckCircle2, Clock, ExternalLink, FileText, Percent, RefreshCw, SearchX } from 'lucide-react'
 import { PageHeader } from '@/layout/PageHeader'
 import { useAsync } from '@/lib/useAsync'
 import { useScopeJournals } from '@/lib/scope'
@@ -31,7 +31,7 @@ function Bar({ value, label }: { value: number; label: string }) {
 export function ScholarPage() {
   const journals = useScopeJournals()
   const perm = usePermission('scholar')
-  const canRecheck = perm.can('work')
+  const canRecheck = perm.can('manage')
   const { data, loading, error, reload } = useAsync(() => listScholarStatus(journals), [journals])
   const [journalF, setJournalF] = useState('')
   const [issueF, setIssueF] = useState('')
@@ -86,11 +86,17 @@ export function ScholarPage() {
       id: 'status', header: 'Google Scholar', sort: (r) => (r.indexed ? 1 : 0),
       cell: (r) => r.indexed ? <Badge tone="success"><CheckCircle2 size={12} aria-hidden /> Indexed</Badge> : <Badge tone="warning"><Clock size={12} aria-hidden /> Not indexed</Badge>,
     },
+    {
+      id: 'result', header: 'Scholar result',
+      cell: (r) => r.indexed
+        ? <a href={r.resultUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 whitespace-nowrap text-accent hover:underline" data-no-row-click>View result <ExternalLink size={12} aria-hidden /><span className="sr-only"> for {r.paperId} (opens in a new tab)</span></a>
+        : <span className="text-sm text-muted">No result yet</span>,
+    },
     { id: 'checked', header: 'Last checked', sort: (r) => r.lastChecked, cell: (r) => <RelativeTime value={r.lastChecked} /> },
     {
       id: 'action', header: 'Action', align: 'right', mobileHide: false,
       cell: (r) => (
-        <GuardedButton allowed={canRecheck} why={perm.why('work')} className="btn-secondary" disabled={busy.has(r.paperId)} onClick={() => recheck([r.paperId])} aria-label={`Recheck ${r.paperId}`}>
+        <GuardedButton allowed={canRecheck} why={perm.why('manage')} className="btn-secondary" disabled={busy.has(r.paperId)} onClick={() => recheck([r.paperId])} aria-label={`Recheck ${r.paperId}`}>
           <RefreshCw size={14} strokeWidth={1.5} aria-hidden className={busy.has(r.paperId) ? 'animate-spin' : ''} /> {busy.has(r.paperId) ? 'Checking…' : 'Recheck'}
         </GuardedButton>
       ),
@@ -100,10 +106,10 @@ export function ScholarPage() {
   return (
     <>
       <PageHeader
-        title="Google Scholar indexing"
-        description="Which published articles Google Scholar has indexed, and when each was last checked."
+        title="Google Scholar Indexing"
+        description="Which published articles Google Scholar has indexed, when each was last checked, and the indexing rate per issue."
         actions={
-          <GuardedButton allowed={canRecheck} why={perm.why('work')} className="btn-primary" disabled={loading || busy.size > 0}
+          <GuardedButton allowed={canRecheck} why={perm.why('manage')} className="btn-primary" disabled={loading || busy.size > 0 || rows.every((r) => r.indexed)}
             onClick={() => recheck(rows.filter((r) => !r.indexed).map((r) => r.paperId))}>
             <RefreshCw size={15} strokeWidth={1.5} aria-hidden /> Recheck not indexed ({rows.filter((r) => !r.indexed).length})
           </GuardedButton>
@@ -175,11 +181,13 @@ export function ScholarPage() {
               </>
             }
             bulkActions={(sel, clear) => (
-              <GuardedButton allowed={canRecheck} why={perm.why('work')} className="btn-secondary" onClick={() => recheck(sel.map((s) => s.paperId), clear)}>
+              <GuardedButton allowed={canRecheck} why={perm.why('manage')} className="btn-secondary" onClick={() => recheck(sel.map((s) => s.paperId), clear)}>
                 <RefreshCw size={14} strokeWidth={1.5} aria-hidden /> Recheck {sel.length} selected
               </GuardedButton>
             )}
-            empty={{ icon: SearchX, title: 'No articles match these filters', hint: 'Clear a filter, or publish an article first — only published articles are indexed.' }}
+            empty={all.length === 0
+              ? { icon: SearchX, title: 'No published articles yet', hint: 'Google Scholar only indexes published articles. Publish one from Final approval and it will appear here.' }
+              : { icon: SearchX, title: 'No articles match these filters', hint: 'Clear a filter or search to see every published article.', action: <button className="btn-secondary" onClick={() => { setJournalF(''); setIssueF(''); setStatusF('') }}>Clear filters</button> }}
           />
         </div>
       )}

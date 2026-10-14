@@ -7,10 +7,10 @@ import { Dialog } from '@/components/Dialog'
 import { FormField } from '@/components/Form'
 import { toast } from '@/components/Toasts'
 import { useSession } from '@/mock/store'
-import { ROLE_FLAG } from '@/permissions/features'
-import { inviteUser } from '@/mock/api/users'
+import { ROLE_FLAG } from '@/permissions/flags'
+import { hasExpertiseRole, inviteUser } from '@/mock/api/users'
 import { Link } from 'react-router-dom'
-import { CopyField, RoleMatrix, type Assignments } from './userUi'
+import { CopyField, ExpertisePicker, RoleMatrix, type Assignments } from './userUi'
 
 const schema = z.object({
   name: z.string().trim().min(2, 'Enter the person’s full name.'),
@@ -30,6 +30,7 @@ export function InviteDialog({ open, onClose }: { open: boolean; onClose: () => 
 function InviteBody({ onClose }: { onClose: () => void }) {
   const flags = useSession((s) => s.flags)
   const [assignments, setAssignments] = useState<Assignments>({})
+  const [expertise, setExpertise] = useState<string[]>([])
   const [rolesError, setRolesError] = useState<string>()
   const [serverError, setServerError] = useState<string>()
   const [done, setDone] = useState<{ id: string; name: string; email: string; link: string } | null>(null)
@@ -42,7 +43,7 @@ function InviteBody({ onClose }: { onClose: () => void }) {
     if (roles.some((r) => r && ROLE_FLAG[r] && !flags[ROLE_FLAG[r]!])) return setRolesError('Review Panel Member is switched off, so it cannot be assigned.')
     setRolesError(undefined)
     try {
-      const { user, link } = await inviteUser({ ...v, assignments })
+      const { user, link } = await inviteUser({ ...v, assignments, expertise: hasExpertiseRole(assignments) ? expertise : [] })
       setDone({ id: user.id, name: user.name, email: user.email, link })
       toast.success(`Invitation created for ${user.name}.`)
     } catch (e) {
@@ -86,9 +87,15 @@ function InviteBody({ onClose }: { onClose: () => void }) {
         <RoleMatrix value={assignments} onChange={(a) => { setAssignments(a); setRolesError(undefined) }} />
         {rolesError && <p role="alert" className="mt-1 text-xs text-red-600">{rolesError}</p>}
         <p className="mt-2 text-xs text-muted">
-          One person can hold different roles in different journals. Super Admin in any journal also opens Users, Journals &amp; settings and the Audit log.
+          One person can hold different roles in different journals. Super Admin in any journal also opens User Management, Journal Settings and the Audit Log.
         </p>
       </fieldset>
+      {hasExpertiseRole(assignments) && (
+        <fieldset>
+          <legend className="label">Reviewer expertise areas</legend>
+          <ExpertisePicker value={expertise} onChange={setExpertise} />
+        </fieldset>
+      )}
       <div className="flex items-center justify-end gap-2 border-t border-line pt-3">
         <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
         <button type="submit" className="btn-primary" disabled={isSubmitting}><Mail size={15} strokeWidth={1.5} aria-hidden /> {isSubmitting ? 'Creating…' : 'Send invitation'}</button>

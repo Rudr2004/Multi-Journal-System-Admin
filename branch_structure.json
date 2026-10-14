@@ -1,0 +1,21 @@
+{
+  "default_branch": "development",
+  "branches": [
+    "development",
+    "feature/roleBase-UI",
+    "modify/UI",
+    "origin"
+  ],
+  "parent": {
+    "development": null,
+    "feature/roleBase-UI": "development",
+    "modify/UI": "development",
+    "origin": "development"
+  },
+  "order": [
+    "development",
+    "feature/roleBase-UI",
+    "modify/UI",
+    "origin"
+  ]
+}

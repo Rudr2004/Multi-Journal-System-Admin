@@ -248,7 +248,7 @@ export const buildDispatched = (): DispatchedBatch[] => {
 /* ------------------------------------------------------------------ */
 
 export interface ChatMessage { id: string; direction: 'in' | 'out'; text: string; at: string; by?: string; template?: boolean }
-export interface ChatMeta { assigneeId?: string; resolved: boolean }
+export interface ChatMeta { assigneeId?: string; resolved: boolean; ticketId?: string }
 
 const THREADS: Record<string, [('in' | 'out'), string, number][]> = {
   'chat-1': [['in', 'Good morning, I submitted my paper two weeks back.', 3.4], ['out', 'Good morning. Could you share the Paper ID so we can check the status?', 3.2], ['in', 'Hello, has my paper been reviewed yet?', 0.2]],
@@ -284,7 +284,10 @@ export const WHATSAPP_QUICK_REPLIES = [
 /* Helpdesk                                                             */
 /* ------------------------------------------------------------------ */
 
-export type TicketSource = 'Portal form' | 'Enquiry form' | 'Email' | 'WhatsApp' | 'Phone'
+export type TicketSource = 'Portal form' | 'Enquiry form' | 'Website form' | 'Email' | 'WhatsApp' | 'Chat' | 'Phone'
+/** Sources offered in filters; the older form labels are shown as 'Website form'. */
+export const TICKET_SOURCES = ['WhatsApp', 'Email', 'Chat', 'Website form', 'Phone'] as const
+export const sourceLabel = (s: TicketSource): string => (s === 'Portal form' || s === 'Enquiry form' ? 'Website form' : s)
 export interface TicketMessage { id: string; from: 'requester' | 'agent'; author: string; text: string; at: string }
 export interface TicketNote { id: string; author: string; text: string; at: string }
 export interface TicketDetail {
@@ -321,7 +324,7 @@ const REPLIES = [
   'This is now fixed from our side. Please try again and let us know if you still face the problem.',
 ]
 const CATEGORIES = ['Billing', 'Certificates', 'Submission', 'Billing', 'Publication', 'Review process', 'Account', 'Ethics', 'Submission', 'Indexing', 'Publication', 'Billing', 'Billing', 'Special issues']
-const SOURCES: TicketSource[] = ['Portal form', 'Enquiry form', 'Email', 'WhatsApp', 'Enquiry form', 'Portal form', 'Email', 'Phone']
+const SOURCES: TicketSource[] = ['Website form', 'Enquiry form', 'Email', 'WhatsApp', 'Chat', 'Portal form', 'Email', 'Phone']
 
 interface TicketLike { id: string; journal: JournalCode; subject: string; requester: string; status: string; createdAt: string }
 

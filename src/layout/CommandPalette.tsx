@@ -2,7 +2,7 @@ import { useEffect, useMemo } from 'react'
 import { Command } from 'cmdk'
 import { useNavigate } from 'react-router-dom'
 import { CornerDownLeft, FileText, LifeBuoy, Search } from 'lucide-react'
-import { NAV_GROUPS } from '@/navigation/nav'
+import { SECTIONS, menuFor } from '@/navigation/nav'
 import { levelFor } from '@/permissions/matrix'
 import { useJournals, useRole } from '@/permissions/hooks'
 import { useDataStore, useSession } from '@/mock/store'
@@ -33,7 +33,12 @@ export function CommandPalette() {
   }, [setOpen])
 
   const visible = (j: string) => (scope === 'ALL' ? journals.includes(j as never) : j === scope)
-  const pages = useMemo(() => NAV_GROUPS.flatMap((g) => g.items.filter((i) => levelFor(role, i.area) !== 'none').map((i) => ({ ...i, group: g.label }))), [role])
+  const pages = useMemo(() => {
+    const main = menuFor(role).flatMap((g) => g.items.map((i) => ({ ...i, group: g.label || 'Main' })))
+    const seen = new Set(main.map((m) => m.path))
+    const extra = SECTIONS.filter((s) => role && s.roles.includes(role)).flatMap((s) => s.tabs.filter((t) => !seen.has(t.path) && levelFor(role, t.area) !== 'none' && seen.add(t.path)).map((t) => ({ ...t, group: s.label })))
+    return [...main, ...extra]
+  }, [role])
   const canSeePapers = levelFor(role, 'submissions') !== 'none'
   const canSeeTickets = levelFor(role, 'helpdesk') !== 'none'
   const go = (to: string) => { setOpen(false); navigate(to) }

@@ -15,11 +15,18 @@ import { usePermission } from '@/permissions/hooks'
 import { createConference, listConferences, type ConferenceRow } from '@/mock/api/conferences'
 import { conferenceStatus } from '@/mock/data/publishing'
 import { formatDate, formatMoney } from '@/shared/formatters'
+import { ConferenceProductionList } from './ConferenceProduction'
 import { ConferenceFields, conferenceSchema, toFormValues, toInput } from './conferenceForm'
 
 const dateRange = (c: ConferenceRow) => (c.startDate === c.endDate ? formatDate(c.startDate) : `${formatDate(c.startDate)} – ${formatDate(c.endDate)}`)
 
+/** Editor and Super Admin manage conferences; the Associate Editor only completes production of conference papers. */
 export function ConferencesPage() {
+  const perm = usePermission('conferences')
+  return perm.can('manage') ? <ConferencesManager /> : <ConferenceProductionList />
+}
+
+function ConferencesManager() {
   const journals = useScopeJournals()
   const all = useIsAllJournals()
   const perm = usePermission('conferences')

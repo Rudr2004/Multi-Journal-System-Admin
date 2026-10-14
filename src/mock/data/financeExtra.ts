@@ -1,4 +1,4 @@
-import type { JournalCode, Paper, Payment } from '@/shared/types'
+import type { JournalCode, Paper, PaperStatus, Payment } from '@/shared/types'
 import { NOW } from './papers'
 
 const ago = (days: number) => new Date(NOW.getTime() - days * 86_400_000).toISOString()
@@ -32,6 +32,8 @@ export interface ReferralPayout {
   mode: PayoutMode
   reference: string
   recordedBy: string
+  /** Proof of payment (mock upload: only the file name and size are kept). */
+  proof?: { name: string; size: number }
 }
 
 export interface ReferralCredit {
@@ -43,6 +45,7 @@ export interface ReferralCredit {
   paperId: string
   journal: JournalCode
   amount: number // INR
+  /** Stored status: 'pending' means "not paid or cancelled by an action" — Eligible/Pending/Cancelled are then derived from the paper. */
   status: ReferralStatus
   earnedAt: string
   note?: string
@@ -66,14 +69,22 @@ const REFERRERS: Pick<ReferralCredit, 'referrer' | 'referrerEmail' | 'referrerTy
 
 const PAYOUT_REFS = ['UTR426118830091', 'NEFT-SBIN5202610041', 'UPI/6218843107', 'CHQ 004512']
 
+/** A credit becomes Eligible only after the referred paper is published; Paid and Cancelled (set by actions) override. */
+export function derivedReferralStatus(c: Pick<ReferralCredit, 'status'>, paperStatus: PaperStatus | undefined): ReferralStatus {
+  if (c.status === 'paid' || c.status === 'cancelled') return c.status
+  if (paperStatus && ['published', 'indexed', 'corrected'].includes(paperStatus)) return 'eligible'
+  if (paperStatus && ['withdrawn', 'rejected'].includes(paperStatus)) return 'cancelled'
+  return 'pending'
+}
+
 /** Realistic referral credits spread across statuses, tied to real papers in the store. */
 export function buildReferrals(papers: Paper[]): ReferralCredit[] {
   const pick = (statuses: Paper['status'][], n: number, skip = 0) => papers.filter((p) => statuses.includes(p.status)).slice(skip, skip + n)
   const groups: [ReferralStatus, Paper[]][] = [
-    ['paid', pick(['published', 'indexed'], 4)],
-    ['eligible', pick(['paid', 'in_production', 'ready_for_approval', 'published'], 4, 2)],
-    ['pending', pick(['accepted', 'payment_pending', 'under_review'], 4)],
-    ['cancelled', pick(['rejected', 'withdrawn'], 2)],
+    ['paid', pick(['published', 'indexed'], 3)],
+    ['pending', pick(['published', 'indexed', 'corrected'], 4, 3)], // become Eligible automatically (paper published)
+    ['pending', pick(['paid', 'in_production', 'ready_for_approval', 'accepted', 'payment_pending', 'under_review'], 4)],
+    ['pending', pick(['rejected', 'withdrawn'], 2)], // become Cancelled automatically
   ]
   const out: ReferralCredit[] = []
   let k = 0
@@ -84,15 +95,15 @@ export function buildReferrals(papers: Paper[]): ReferralCredit[] {
       const earnedAt = ago(6 + k * 6)
       const credit: ReferralCredit = {
         id: `REF-${3100 + k}`, ...r, referredAuthor: p.author, paperId: p.id, journal: p.journal, amount, status, earnedAt,
-        note: status === 'pending' ? 'Becomes eligible once the referred author’s APC payment is verified.' : undefined,
+        note: status === 'pending' ? 'Becomes eligible once the referred paper is published.' : undefined,
       }
       if (status === 'paid') {
         credit.payout = {
           date: ago(2 + k * 3).slice(0, 10), amount, mode: (['bank_transfer', 'upi', 'bank_transfer', 'cheque'] as PayoutMode[])[k % 4],
           reference: PAYOUT_REFS[k % PAYOUT_REFS.length], recordedBy: 'Priya Menon',
+          proof: { name: `payout-proof-${PAYOUT_REFS[k % PAYOUT_REFS.length].replace(/[^A-Za-z0-9]/g, '')}.pdf`, size: 118_000 + k * 7_300 },
         }
       }
-      if (status === 'cancelled') credit.cancelReason = p.status === 'rejected' ? 'Referred paper was rejected; no APC was charged.' : 'Referred author withdrew the paper before payment.'
       out.push(credit)
       k++
     }

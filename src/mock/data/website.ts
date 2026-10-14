@@ -229,8 +229,15 @@ export const PLACEMENTS = [
 ] as const
 export type Placement = (typeof PLACEMENTS)[number]['id']
 
+export type AnnouncementChannel = 'scrolling' | 'tab'
+export const CHANNEL_LABEL: Record<AnnouncementChannel, string> = { scrolling: 'Scrolling Notifications', tab: 'Tab Notifications' }
+
 export interface Announcement {
   id: string
+  /** Scrolling ticker on every page, or the Notices tab on the home page (prototype interpretation). */
+  channel: AnnouncementChannel
+  link: string
+  highlight: boolean
   /** Records created together share a batch id (multi-journal posts). */
   batchId: string
   journal: JournalCode
@@ -253,7 +260,7 @@ export function announcementStatus(a: Pick<Announcement, 'startAt' | 'endAt'>, n
   return 'live'
 }
 
-type AnnSeed = Omit<Announcement, 'id' | 'batchId' | 'createdAt' | 'createdBy'> & { batch: string; created: number }
+type AnnSeed = Omit<Announcement, 'id' | 'batchId' | 'createdAt' | 'createdBy' | 'channel' | 'link' | 'highlight'> & { batch: string; created: number }
 
 const ANN: AnnSeed[] = [
   { batch: 'b1', created: 20, journal: 'IJMAT', type: 'Call for Papers', title: 'Call for papers: Volume 4, Issue 1 (January 2027)', body: 'IJMAT is accepting submissions for the January 2027 issue. Research articles, review articles and case studies are welcome. Submit by 20 December 2026.', placements: ['banner', 'page'], pinned: true, startAt: ago(14), endAt: ahead(70), emailSubscribers: true },
@@ -274,7 +281,13 @@ const ANN: AnnSeed[] = [
 export function buildAnnouncements(): Announcement[] {
   return ANN.map((a, i) => {
     const { batch, created, ...rest } = a
-    return { ...rest, id: `ann-${i + 1}`, batchId: batch, createdAt: ago(created), createdBy: STAFF[i % 3] }
+    const channel: AnnouncementChannel = rest.placements.includes('topbar') || rest.placements.includes('banner') ? 'scrolling' : 'tab'
+    return {
+      ...rest, id: `ann-${i + 1}`, batchId: batch, createdAt: ago(created), createdBy: STAFF[i % 3],
+      channel, highlight: rest.type === 'Deadline Extension' || rest.type === 'Call for Papers',
+      link: rest.type === 'Maintenance' ? '' : `https://${journalByCode(rest.journal).domain}/announcements`,
+      placements: channel === 'scrolling' ? ['topbar'] : ['page'],
+    }
   })
 }
 

@@ -36,5 +36,5 @@ export const DEMO_USER_LABELS: Record<string, string> = {
   'u-multi': 'Multi-role — Editor IJMAT, Assoc. Editor JIMRT',
   'u-reviewer': 'Reviewer — IJMAT',
   'u-panel': 'Review Panel Member — IJECM',
-  'u-support': 'Support Staff — IJMAT, JIMRT',
+  'u-support': 'Support Executive — IJMAT, JIMRT',
 }

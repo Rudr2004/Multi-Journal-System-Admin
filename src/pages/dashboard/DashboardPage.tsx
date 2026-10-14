@@ -3,7 +3,10 @@ import { useSession } from '@/mock/store'
 import { PageHeader } from '@/layout/PageHeader'
 import { ROLE_META } from '@/permissions/roles'
 import { AdminDashboard } from './AdminDashboard'
-import { ProductionDashboard, ReviewerDashboard, SupportDashboard } from './RoleDashboards'
+import { EditorDashboard } from './EditorDashboard'
+import { AssociateDashboard } from './AssociateDashboard'
+import { ReviewerDashboard } from './ReviewerDashboard'
+import { SupportDashboard } from './SupportDashboard'
 
 const greeting = () => {
   const h = new Date().getHours()
@@ -21,8 +24,9 @@ export function DashboardPage() {
   return (
     <>
       <PageHeader title="Dashboard" description={`${greeting()}, ${first}. Here is ${where} as ${role ? ROLE_META[role].label : 'a user'}.`} />
-      {(role === 'super_admin' || role === 'editor') && <AdminDashboard />}
-      {role === 'associate_editor' && <ProductionDashboard />}
+      {role === 'super_admin' && <AdminDashboard />}
+      {role === 'editor' && <EditorDashboard />}
+      {role === 'associate_editor' && <AssociateDashboard />}
       {(role === 'reviewer' || role === 'panel_member') && <ReviewerDashboard />}
       {role === 'support' && <SupportDashboard />}
     </>

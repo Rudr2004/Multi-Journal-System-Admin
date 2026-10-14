@@ -18,13 +18,14 @@ const isMac = typeof navigator !== 'undefined' && /mac/i.test(navigator.platform
 
 function DispatchIndicator() {
   const scope = useSession((s) => s.journal)
-  const { can } = usePermission('dispatch')
+  const dispatchAccess = usePermission('dispatch')
+  const { can } = usePermission('submissions')
   const count = useDataStore((s) => s.papers.filter((p) => p.dispatchAt && (scope === 'ALL' || p.journal === scope)).length)
-  if (!can('view')) return null
+  if (!can('approve')) return null
   const at = nextDispatch()
   return (
     <Tooltip text={`Next dispatch ${formatDate(at)}, ${formatTime(at)} IST`}>
-      <Link to="/dispatch" className="btn-ghost hidden gap-1.5 md:inline-flex">
+      <Link to={dispatchAccess.can('view') ? '/dispatch' : '#'} onClick={(e) => { if (!dispatchAccess.can('view')) e.preventDefault() }} className="btn-ghost hidden gap-1.5 md:inline-flex">
         <Send size={16} strokeWidth={1.5} aria-hidden />
         <span className="hidden whitespace-nowrap xl:inline">Next {formatTime(at)} dispatch</span><span className="whitespace-nowrap xl:hidden">{formatTime(at)}</span>
         <span className="rounded-full bg-accent-soft px-1.5 text-xs font-semibold text-accent">{count}</span>

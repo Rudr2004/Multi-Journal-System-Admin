@@ -1,30 +1,25 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { z } from 'zod'
-import { Clock, Lock, Plus, Trash2 } from 'lucide-react'
-import { PageHeader } from '@/layout/PageHeader'
+import { Lock, Plus, Trash2 } from 'lucide-react'
 import { Badge } from '@/components/Badges'
 import { SectionCard } from '@/components/Card'
 import { ConfirmDialog } from '@/components/Dialog'
-import { ErrorState } from '@/components/States'
 import { Switch } from '@/components/Form'
-import { Tabs } from '@/components/Tabs'
 import { GuardedButton } from '@/components/Tooltip'
 import { toast } from '@/components/Toasts'
-import { useAsync } from '@/lib/useAsync'
 import { useUnsavedChanges } from '@/lib/useUnsavedChanges'
 import { cn } from '@/lib/utils'
-import { usePermission } from '@/permissions/hooks'
 import type { Channel } from '@/shared/types'
-import { listTemplateBundle, saveReminders, saveTimeSlots, setChannelPaused, type TemplateBundle } from '@/mock/api/templates'
+import { saveReminders, saveTimeSlots, setChannelPaused, type TemplateBundle } from '@/mock/api/templates'
 import { TEMPLATE_EVENTS, type ReminderSequence, type TimeSlot } from '@/mock/data/communication'
-import { CHANNEL_LABEL, ChannelBadge, PageSkeleton } from './parts'
+import { CHANNEL_LABEL, ChannelBadge } from './parts'
 import { TemplateEditor } from './TemplateEditor'
 
 const CHANNELS: Channel[] = ['email', 'sms', 'whatsapp']
 
 /* ------------------------------ templates tab ------------------------------ */
 
-function TemplatesTab({ bundle, canEdit, why, onDirty, reload }: { bundle: TemplateBundle; canEdit: boolean; why?: string; onDirty: (d: boolean) => void; reload: () => void }) {
+export function TemplatesTab({ bundle, canEdit, why, onDirty, reload }: { bundle: TemplateBundle; canEdit: boolean; why?: string; onDirty: (d: boolean) => void; reload: () => void }) {
   const [eventKey, setEventKey] = useState(TEMPLATE_EVENTS[0].key)
   const [channel, setChannel] = useState<Channel>('email')
   const dirtyRef = useRef(false)
@@ -82,7 +77,7 @@ const slotSchema = z.array(z.object({
   slots.forEach((s, i) => { if (slots.findIndex((x) => x.time === s.time) !== i) ctx.addIssue({ code: 'custom', path: [i, 'time'], message: 'Another slot already uses this time' }) })
 })
 
-function SlotsTab({ initial, canEdit, why, onDirty, reload }: { initial: TimeSlot[]; canEdit: boolean; why?: string; onDirty: (d: boolean) => void; reload: () => void }) {
+export function SlotsTab({ initial, canEdit, why, onDirty, reload }: { initial: TimeSlot[]; canEdit: boolean; why?: string; onDirty: (d: boolean) => void; reload: () => void }) {
   const [slots, setSlots] = useState(initial)
   const [saving, setSaving] = useState(false)
   const dirty = JSON.stringify(slots) !== JSON.stringify(initial)
@@ -159,7 +154,7 @@ function SlotsTab({ initial, canEdit, why, onDirty, reload }: { initial: TimeSlo
 
 /* ------------------------------ reminders tab ------------------------------ */
 
-function RemindersTab({ initial, canEdit, why, onDirty, reload }: { initial: ReminderSequence[]; canEdit: boolean; why?: string; onDirty: (d: boolean) => void; reload: () => void }) {
+export function RemindersTab({ initial, canEdit, why, onDirty, reload }: { initial: ReminderSequence[]; canEdit: boolean; why?: string; onDirty: (d: boolean) => void; reload: () => void }) {
   const [seqs, setSeqs] = useState(initial)
   const [saving, setSaving] = useState(false)
   const dirty = JSON.stringify(seqs) !== JSON.stringify(initial)
@@ -240,7 +235,7 @@ function RemindersTab({ initial, canEdit, why, onDirty, reload }: { initial: Rem
 
 /* ------------------------------ pause tab ------------------------------ */
 
-function PauseTab({ paused, canEdit, why, reload }: { paused: Record<Channel, boolean>; canEdit: boolean; why?: string; reload: () => void }) {
+export function PauseTab({ paused, canEdit, why, reload }: { paused: Record<Channel, boolean>; canEdit: boolean; why?: string; reload: () => void }) {
   const [confirm, setConfirm] = useState<Channel | null>(null)
   const [busy, setBusy] = useState(false)
   const toggle = async (c: Channel, pause: boolean) => {
@@ -284,37 +279,3 @@ function PauseTab({ paused, canEdit, why, reload }: { paused: Record<Channel, bo
   )
 }
 
-/* ------------------------------ page ------------------------------ */
-
-export function TemplatesPage() {
-  const { can, why } = usePermission('templates')
-  const canEdit = can('manage')
-  const { data, loading, error, reload } = useAsync(listTemplateBundle, [])
-  const [tab, setTab] = useState('templates')
-  const dirtyRef = useRef(false)
-  const onDirty = useCallback((d: boolean) => { dirtyRef.current = d }, [])
-  const change = (id: string) => {
-    if (id === tab) return
-    if (dirtyRef.current && !window.confirm('You have unsaved changes. Discard them and switch tab?')) return
-    dirtyRef.current = false
-    setTab(id)
-  }
-  const w = why('manage')
-
-  return (
-    <>
-      <PageHeader title="Templates & schedule" description="Message templates for every event and channel, dispatch time slots, reminder sequences and channel pause switches."
-        actions={!canEdit ? <Badge tone="neutral"><Clock size={12} aria-hidden /> View only</Badge> : undefined} />
-      {error ? <div className="card"><ErrorState message="Templates could not be loaded." onRetry={reload} /></div>
-        : loading && !data ? <PageSkeleton rows={3} />
-        : data && (
-          <Tabs value={tab} onChange={change} tabs={[
-            { id: 'templates', label: 'Templates', badge: data.templates.length, content: <TemplatesTab bundle={data} canEdit={canEdit} why={w} onDirty={onDirty} reload={reload} /> },
-            { id: 'slots', label: 'Time slots', content: <SlotsTab initial={data.timeSlots} canEdit={canEdit} why={w} onDirty={onDirty} reload={reload} /> },
-            { id: 'reminders', label: 'Reminder sequences', content: <RemindersTab initial={data.reminders} canEdit={canEdit} why={w} onDirty={onDirty} reload={reload} /> },
-            { id: 'pause', label: 'Channel pause', badge: Object.values(data.channelPaused).filter(Boolean).length || undefined, content: <PauseTab paused={data.channelPaused} canEdit={canEdit} why={w} reload={reload} /> },
-          ]} />
-        )}
-    </>
-  )
-}
