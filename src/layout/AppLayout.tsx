@@ -2,6 +2,7 @@ import { Outlet } from 'react-router-dom'
 import { useEnsureValidJournal } from '@/permissions/hooks'
 import { CommandPalette } from './CommandPalette'
 import { MobileNav, Sidebar } from './Sidebar'
+import { SectionTabs } from './SectionTabs'
 import { Topbar } from './Topbar'
 
 export function AppLayout() {
@@ -14,6 +15,7 @@ export function AppLayout() {
       <div className="flex min-w-0 flex-1 flex-col">
         <Topbar />
         <main id="main" tabIndex={-1} className="flex-1 overflow-y-auto p-6 outline-none">
+          <SectionTabs />
           <Outlet />
         </main>
       </div>

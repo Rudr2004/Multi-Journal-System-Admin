@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { AlertOctagon, ArrowRight, CheckCircle2, ExternalLink, Play, Send } from 'lucide-react'
+import { AlertOctagon, ArrowRight, CheckCircle2, ExternalLink, Newspaper, Play, Send } from 'lucide-react'
 import { PageHeader } from '@/layout/PageHeader'
 import { AutosaveIndicator } from '@/components/Autosave'
 import { Badge, JournalBadge, StatusBadge } from '@/components/Badges'
@@ -164,6 +164,7 @@ function Workspace({ initial, paperId }: { initial: ProductionRecord; paperId: s
       <div className="mb-5 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
         <JournalBadge code={paper.journal} />
         <StatusBadge status={paper.status} />
+        {(status === 'in_production' || status === 'returned_to_production' || status === 'ready_for_approval') && <Badge tone="info"><Newspaper size={12} aria-hidden /> In Press</Badge>}
         {status !== 'ready_for_approval' && <span className="inline-flex items-center gap-1.5 text-muted">Due <DueChip value={dueOf(paper)} /></span>}
         <span className="text-muted">Assignee: <span className="text-ink">{users.find((u) => u.id === assigneeId)?.name ?? 'Unassigned'}</span></span>
         <span className="text-muted">DOI: <span className="font-mono text-xs text-ink">{doiFor(paper.id)}</span></span>
@@ -188,6 +189,9 @@ function Workspace({ initial, paperId }: { initial: ProductionRecord; paperId: s
         </div>
       )}
 
+      {(status === 'in_production' || status === 'returned_to_production' || status === 'ready_for_approval') && (
+        <p role="note" className="mb-5 flex items-start gap-2 rounded-lg border border-indigo-200 bg-indigo-50 p-3 text-sm text-indigo-900"><Newspaper size={16} className="mt-0.5 shrink-0" aria-hidden /> Listed publicly on the Article In Press page while in production. It leaves your list when the Editor publishes it.</p>
+      )}
       {status === 'paid' && (
         <div className="mb-5 flex items-center justify-between gap-3 rounded-lg border border-indigo-200 bg-indigo-50 p-4 text-sm text-indigo-900">
           <span>Payment is verified. Start production to unlock editing; the paper then moves to “In production”.</span>

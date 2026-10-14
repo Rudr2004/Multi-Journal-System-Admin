@@ -15,12 +15,14 @@ import { toast } from '@/components/Toasts'
 import { useAsync } from '@/lib/useAsync'
 import { useIsAllJournals, useScopeJournals } from '@/lib/scope'
 import { useCurrentUser, usePermission } from '@/permissions/hooks'
+import { TICKET_SOURCES, sourceLabel } from '@/mock/data/communication'
 import { parsePaperId } from '@/shared/paperId'
 import type { JournalCode, Ticket } from '@/shared/types'
 import { useDataStore } from '@/mock/store'
 import { useCommStore } from '@/mock/stores/communication'
 import { PRIORITY_ORDER, createTicket, listTickets, mergeTickets, responseTimer, type HelpTicket } from '@/mock/api/helpdesk'
 import { useNow } from './hooks'
+import { PaperLink } from './parts'
 import { PriorityBadge, SlaChip, TicketLink, TicketStatusBadge } from './helpdeskParts'
 
 interface Filters { status: string; priority: string; assignee: string; source: string }
@@ -73,6 +75,7 @@ export function HelpdeskPage() {
   const journals = useScopeJournals()
   const showJournal = useIsAllJournals()
   const { can, why } = usePermission('helpdesk')
+  const canOpenPaper = usePermission('submissions').can('view')
   const me = useCurrentUser()
   const { loading, error, reload } = useAsync(() => listTickets(journals), [journals.join()])
   const tickets = useDataStore((s) => s.tickets)
@@ -87,7 +90,7 @@ export function HelpdeskPage() {
   const rows = useMemo(() => all.filter((t) =>
     (!filters.status || t.status === filters.status) &&
     (!filters.priority || t.priority === filters.priority) &&
-    (!filters.source || t.detail.source === filters.source) &&
+    (!filters.source || sourceLabel(t.detail.source) === filters.source) &&
     (!filters.assignee || (filters.assignee === 'unassigned' ? !t.assigneeId : filters.assignee === 'me' ? t.assigneeId === me?.id : t.assigneeId === filters.assignee)),
   ), [all, filters, me?.id])
 
@@ -115,7 +118,8 @@ export function HelpdeskPage() {
     { id: 'priority', header: 'Priority', sort: (t) => PRIORITY_ORDER[t.priority], cell: (t) => <PriorityBadge priority={t.priority} /> },
     { id: 'status', header: 'Status', sort: (t) => t.status, cell: (t) => <TicketStatusBadge status={t.status} /> },
     { id: 'assignee', header: 'Assignee', sort: (t) => name(t.assigneeId) ?? 'zzz', cell: (t) => name(t.assigneeId) ? <span className="whitespace-nowrap">{name(t.assigneeId)}</span> : <span className="text-faint">Unassigned</span> },
-    { id: 'source', header: 'Source', defaultHidden: true, sort: (t) => t.detail.source, cell: (t) => t.detail.source },
+    { id: 'source', header: 'Source', sort: (t) => sourceLabel(t.detail.source), cell: (t) => <span className="whitespace-nowrap">{sourceLabel(t.detail.source)}</span> },
+    { id: 'paper', header: 'Paper ID', sort: (t) => t.detail.paperId, cell: (t) => <PaperLink id={t.detail.paperId} plain={!canOpenPaper} /> },
     { id: 'sla', header: 'Response timer', sort: (t) => (t.status === 'resolved' ? Number.MAX_SAFE_INTEGER : new Date(t.dueAt).getTime()), cell: (t) => <SlaChip ticket={t} now={now} /> },
   ]
 
@@ -142,7 +146,7 @@ export function HelpdeskPage() {
           <SelectFilter label="Status" value={filters.status} onChange={set('status')} options={[{ value: 'open', label: 'Open' }, { value: 'pending', label: 'Pending' }, { value: 'resolved', label: 'Resolved' }]} />
           <SelectFilter label="Priority" value={filters.priority} onChange={set('priority')} options={(['urgent', 'high', 'normal', 'low'] as Ticket['priority'][]).map((p) => ({ value: p, label: p[0].toUpperCase() + p.slice(1) }))} />
           <SelectFilter label="Assignee" value={filters.assignee} onChange={set('assignee')} options={[{ value: 'me', label: 'Assigned to me' }, { value: 'unassigned', label: 'Unassigned' }]} />
-          <SelectFilter label="Source" value={filters.source} onChange={set('source')} options={['Portal form', 'Enquiry form', 'Email', 'WhatsApp', 'Phone'].map((s) => ({ value: s, label: s }))} />
+          <SelectFilter label="Source" value={filters.source} onChange={set('source')} options={TICKET_SOURCES.map((s) => ({ value: s, label: s }))} />
         </>}
       />
 
