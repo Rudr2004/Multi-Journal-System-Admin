@@ -12,10 +12,13 @@ import { useIsAllJournals } from '@/lib/scope'
 import { useAsync } from '@/lib/useAsync'
 import { useRole } from '@/permissions/hooks'
 import { formatDate } from '@/shared/formatters'
-import { listMyReviewHistory, listMyReviews, listSubjectSubmissions, type MyReviewRow, type SubjectSubmissionRow } from '@/mock/api/reviews'
+import { assignmentMetaOf, listAllSubmissions, listMyReviewHistory, listMyReviews, setAssignmentMeta, type AllSubmissionRow, type MyReviewRow } from '@/mock/api/reviews'
+import { toast } from '@/components/Toasts'
+import { useEditorialStore, type AssignmentResult, type AssignmentState } from '@/mock/stores/editorial'
+import { AssignExternalDialog } from './AssignExternalDialog'
 import { averageScore, type ReviewRecord } from '@/mock/data/editorial'
 import { NOW } from '@/mock/data/papers'
-import { useSession } from '@/mock/store'
+import { useDataStore } from '@/mock/store'
 import { PaperIdLink, RecommendationBadge, SubjectTags, TitleText, useAccess } from './shared'
 import { ReviewReport } from './ReviewReport'
 
@@ -30,13 +33,16 @@ const Anonymised = () => (
   <span className="inline-flex items-center gap-1 text-xs italic text-muted"><EyeOff size={12} aria-hidden /> Anonymised</span>
 )
 
-/** Read-only list of every submission in the reviewer's subject area. Rendered only while the reviewerSeesAll flag is on. */
-function SubjectSubmissions() {
+/** Every submitted article, with Assign Reviewer to send it to an external Review Panel Member. */
+function AllSubmissions() {
   const ctx = useAccess('myReviews')
   const allJournals = useIsAllJournals()
-  const q = useAsync(() => listSubjectSubmissions(ctx.userId, ctx.journals), [ctx])
-  const columns = useMemo<Column<SubjectSubmissionRow>[]>(() => {
-    const c: Column<SubjectSubmissionRow>[] = [
+  const papers = useDataStore((s) => s.papers)
+  const panelKey = useEditorialStore((s) => s.panelOverrides)
+  const q = useAsync(() => listAllSubmissions(ctx.userId, ctx.journals), [ctx, papers, panelKey])
+  const [assigning, setAssigning] = useState<AllSubmissionRow | null>(null)
+  const columns = useMemo<Column<AllSubmissionRow>[]>(() => {
+    const c: Column<AllSubmissionRow>[] = [
       { id: 'id', header: 'Paper ID', locked: true, sort: (r) => r.paperId, cell: (r) => <span className="whitespace-nowrap font-medium">{r.paperId}</span> },
       { id: 'title', header: 'Title', className: 'min-w-[260px]', sort: (r) => r.title, cell: (r) => <TitleText title={r.title} /> },
     ]
@@ -46,22 +52,42 @@ function SubjectSubmissions() {
       { id: 'author', header: 'Author', cell: () => <Anonymised /> },
       { id: 'status', header: 'Status', sort: (r) => r.status, cell: (r) => <StatusBadge status={r.status} /> },
       { id: 'at', header: 'Submitted', sort: (r) => r.submittedAt, cell: (r) => <span className="whitespace-nowrap">{formatDate(r.submittedAt)}</span> },
+      { id: 'ext', header: 'External reviewer', cell: (r) => (r.panelMemberName ? <div><p className="whitespace-nowrap text-sm">{r.panelMemberName}</p><p className="text-xs text-muted">Due {r.due ? formatDate(r.due) : '—'}{r.autoReassigned > 0 ? ` · reassigned ×${r.autoReassigned}` : ''}</p></div> : <span className="text-faint">Not assigned</span>) },
+      { id: 'assign', header: '', locked: true, mobileHide: false, cell: (r) => <button type="button" className={r.panelMemberName ? 'btn-secondary !h-8 whitespace-nowrap' : 'btn-primary !h-8 whitespace-nowrap'} onClick={() => setAssigning(r)}>{r.panelMemberName ? 'Reassign Reviewer' : 'Assign Reviewer'}</button> },
     )
     return c
   }, [allJournals])
   return (
     <div className="space-y-3">
       <div role="note" className="flex flex-wrap items-center gap-2 rounded-lg bg-subtle px-3 py-2 text-sm text-muted">
-        <Badge tone="warning">To confirm</Badge>
-        <span>Client sheet says &ldquo;show all submissions&rdquo; &mdash; to be confirmed. This list is read-only and never shows author identity.</span>
+        <span>Every submitted article is listed. Author identity is never shown. Use <span className="font-medium text-ink">Assign Reviewer</span> to send an article to an external Review Panel Member; if no review arrives by the due date it is assigned again automatically.</span>
       </div>
-      <DataTable<SubjectSubmissionRow>
+      <AssignExternalDialog row={assigning} onClose={() => setAssigning(null)} onDone={q.reload} />
+      <DataTable<AllSubmissionRow>
         id="my-reviews-subject" data={q.data ?? []} columns={columns} rowKey={(r) => r.paperId}
         loading={q.loading && !q.data} error={!!q.error} onRetry={q.reload}
         search={{ placeholder: 'Search Paper ID or title', text: (r) => `${r.paperId} ${r.title}` }}
-        empty={{ icon: Library, title: 'No submissions match your subjects', hint: 'Papers in your journals that share a subject with your expertise appear here.' }}
+        empty={{ icon: Library, title: 'No submitted articles', hint: 'Articles awaiting or in review appear here.' }}
       />
     </div>
+  )
+}
+
+const STATE_OPTIONS: { value: AssignmentState; label: string }[] = [{ value: 'open', label: 'Open' }, { value: 'closed', label: 'Closed' }, { value: 'reviewed', label: 'Reviewed' }]
+const RESULT_OPTIONS: { value: AssignmentResult; label: string }[] = [{ value: 'not_set', label: 'Not Set' }, { value: 'accepted', label: 'Accepted' }, { value: 'rejected', label: 'Rejected' }, { value: 'revision', label: 'Revision Required' }]
+
+/** Independent Status and Result dropdowns for one assignment. Defaults: Open and Not Set. */
+function MetaSelect({ kind, paperId }: { kind: 'state' | 'result'; paperId: string }) {
+  const ctx = useAccess('myReviews')
+  const all = useEditorialStore((s) => s.assignmentMeta)
+  const value = (all[`${paperId}:${ctx.userId}`] ?? assignmentMetaOf(paperId, ctx.userId))[kind]
+  const options = kind === 'state' ? STATE_OPTIONS : RESULT_OPTIONS
+  return (
+    <select aria-label={`${kind === 'state' ? 'Status' : 'Result'} for ${paperId}`} className="input !h-8 !w-auto min-w-[130px] py-0 text-sm" value={value} data-no-row-click
+      onClick={(e) => e.stopPropagation()}
+      onChange={(e) => { void setAssignmentMeta(paperId, ctx.userId, kind === 'state' ? { state: e.target.value as AssignmentState } : { result: e.target.value as AssignmentResult }).then(() => toast.success(`${kind === 'state' ? 'Status' : 'Result'} updated.`)) }}>
+      {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+    </select>
   )
 }
 
@@ -69,8 +95,7 @@ export function MyReviewsPage() {
   const navigate = useNavigate()
   const ctx = useAccess('myReviews')
   const role = useRole()
-  const flagOn = useSession((s) => s.flags.reviewerSeesAll)
-  const seesAll = flagOn && role === 'reviewer'
+  const seesAll = role === 'reviewer'
   const allJournals = useIsAllJournals()
   const mine = useAsync(() => listMyReviews(ctx.userId, ctx.journals), [ctx])
   const hist = useAsync(() => listMyReviewHistory(ctx.userId, ctx.journals), [ctx])
@@ -90,7 +115,9 @@ export function MyReviewsPage() {
       { id: 'author', header: 'Author', mobileHide: true, cell: () => <Anonymised /> },
       { id: 'type', header: 'Type', sort: (r) => r.paper.articleType, cell: (r) => <span className="whitespace-nowrap text-muted">{r.paper.articleType}</span> },
       { id: 'due', header: 'Review due', sort: (r) => r.paper.reviewDue, cell: (r) => (r.paper.status === 'under_review' ? <DueChip value={r.paper.reviewDue} /> : <span className="text-faint">&mdash;</span>) },
-      { id: 'mine', header: 'Status', sort: (r) => myState(r).label, cell: (r) => { const s = myState(r); return <Badge tone={s.tone}>{s.label}</Badge> } },
+      { id: 'mine', header: 'Progress', sort: (r) => myState(r).label, cell: (r) => { const s = myState(r); return <Badge tone={s.tone}>{s.label}</Badge> } },
+      { id: 'astate', header: 'Status', locked: true, cell: (r) => <MetaSelect kind="state" paperId={r.paper.id} /> },
+      { id: 'aresult', header: 'Result', locked: true, cell: (r) => <MetaSelect kind="result" paperId={r.paper.id} /> },
       { id: 'open', header: '', locked: true, cell: (r) => <Link to={`/my-reviews/${r.paper.id}`} className={r.paper.status === 'under_review' ? 'btn-primary !h-8' : 'btn-secondary !h-8'}>{myState(r).cta}</Link> },
     )
     return c
@@ -129,7 +156,7 @@ export function MyReviewsPage() {
         />
       ),
     },
-    ...(seesAll ? [{ id: 'subject', label: 'All submissions in my subject', content: <SubjectSubmissions /> }] : []),
+    ...(seesAll ? [{ id: 'subject', label: 'All submissions', content: <AllSubmissions /> }] : []),
   ]
 
   return (

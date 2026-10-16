@@ -2,7 +2,7 @@ import type { Author, JournalCode, Paper } from '@/shared/types'
 import { computeGst, type Currency } from '@/shared/gst'
 import { addDeposit, currentActor, getAuthors, logEvent, newId, productionAssigneeFor, recordAudit, sendMessage, setPaperStatus } from '../actions'
 import {
-  CHANGE_TYPE_META, type ArticleVersion, type ChangeEvent, type ChangeFee, type ChangeRequest, type ChangeResult, type ChangeTarget, type ChangeType, type ProductionRecord,
+  CHANGE_TYPE_META, type ArticleVersion, type MetadataEdit, type ChangeEvent, type ChangeFee, type ChangeRequest, type ChangeResult, type ChangeTarget, type ChangeType, type ProductionRecord,
 } from '../data/production'
 import { doiFor } from '@/shared/paperId'
 import { journalByCode } from '../data/core'
@@ -231,15 +231,41 @@ export async function releaseWithoutFee(id: string): Promise<ChangeRequest> {
   return find(id)
 }
 
-export async function submitNewVersion(id: string, values: Record<string, string>, summary: string): Promise<ChangeRequest> {
+/** Fields of the metadata edit that differ from what is on record now. */
+function metadataChanges(paperId: string, m: MetadataEdit) {
+  const rec = ensureRecord(paperId)
+  const out: { field: string; oldValue: string; newValue: string }[] = []
+  const diff = (field: string, a: string, b: string) => { if (a.trim() !== b.trim()) out.push({ field, oldValue: a, newValue: b }) }
+  diff('Title', rec.title, m.title)
+  diff('Abstract', rec.abstract, m.abstract)
+  diff('Keywords', rec.keywords.join(', '), m.keywords.join(', '))
+  const n = Math.max(rec.authors.length, m.authors.length)
+  for (let i = 0; i < n; i++) {
+    const a = rec.authors[i]; const b = m.authors[i]
+    const label = (p: string) => `Author ${i + 1} · ${p}`
+    if (!b) { out.push({ field: `Author ${i + 1}`, oldValue: a.name, newValue: '(removed)' }); continue }
+    diff(label('Name'), a?.name ?? '', b.name)
+    diff(label('Email'), a?.email ?? '', b.email)
+    diff(label('Affiliation'), a?.affiliation ?? '', b.affiliation)
+    diff(label('Country'), a?.country ?? '', b.country)
+    diff(label('ORCID iD'), a?.orcid ?? '', b.orcid ?? '')
+    if ((a?.photo ?? '') !== (b.photo ?? '')) out.push({ field: label('Profile photo'), oldValue: a?.photo ? 'Current photo' : 'None', newValue: b.photo ? 'New photo' : 'Removed' })
+  }
+  diff('Final file', rec.finalFile?.name ?? '', m.finalFileName ?? rec.finalFile?.name ?? '')
+  diff('Original submission', rec.manuscript.fileName, m.manuscriptName ?? rec.manuscript.fileName)
+  return out
+}
+
+export async function submitNewVersion(id: string, values: Record<string, string>, summary: string, metadata?: MetadataEdit): Promise<ChangeRequest> {
   const r = find(id)
   if (r.status !== 'ready' && r.status !== 'revision') throw new ApiError('This request is not open for editing yet.')
-  const changes = r.targets
+  const metaChanges = metadata ? metadataChanges(r.paperId, metadata) : []
+  const changes = [...r.targets
     .map((t) => ({ field: t.label, oldValue: t.oldValue, newValue: (values[t.key] ?? t.newValue).trim() }))
-    .filter((c) => c.newValue !== c.oldValue)
+    .filter((c) => c.newValue !== c.oldValue), ...metaChanges.filter((m) => !r.targets.some((t) => t.label === m.field))]
   if (changes.length === 0) throw new ApiError('The new version is identical to the published one.')
   const n = r.baseVersion + 1
-  const version: ArticleVersion = { n, at: new Date().toISOString(), by: currentActor(), summary: summary.trim() || `Version ${n}`, changes, state: 'in_review' }
+  const version: ArticleVersion = { n, at: new Date().toISOString(), by: currentActor(), summary: summary.trim() || `Version ${n}`, changes, metadata: metaChanges.length ? metadata : undefined, state: 'in_review' }
   save(id, (x) => ({ ...x, status: 'version_review', versions: [...x.versions.filter((v) => v.n !== n), version], events: [...x.events, ev(`submitted version ${n} for approval`, version.summary)] }))
   logEvent(r.paperId, `Version ${n} drafted for post-publication change`, version.summary)
   await delay(undefined, 400, 700)
@@ -306,12 +332,27 @@ function applyVersion(r: ChangeRequest, version: ArticleVersion): ChangeResult {
       finalFile = { name: v, version: (rec.finalFile?.version ?? 0) + 1, uploadedAt: new Date().toISOString(), uploadedBy: currentActor(), sizeKb: rec.finalFile?.sizeKb ?? 600 }
     }
   }
+  const meta = version.metadata
+  let title: string | undefined
+  let manuscript = rec.manuscript
+  let abstract = rec.abstract
+  let keywords = rec.keywords
+  if (meta) {
+    title = meta.title
+    abstract = meta.abstract
+    keywords = meta.keywords
+    meta.authors.forEach((a, i) => { if (authors[i]?.name !== a.name) nameChanged.add(i) })
+    authors.splice(0, authors.length, ...meta.authors.map((a) => ({ ...a })))
+    if (meta.finalFileName && meta.finalFileName !== rec.finalFile?.name) finalFile = { name: meta.finalFileName, version: (rec.finalFile?.version ?? 0) + 1, uploadedAt: new Date().toISOString(), uploadedBy: currentActor(), sizeKb: rec.finalFile?.sizeKb ?? 600 }
+    if (meta.manuscriptName && meta.manuscriptName !== rec.manuscript.fileName) manuscript = { ...rec.manuscript, fileName: meta.manuscriptName, version: rec.manuscript.version + 1 }
+  }
   const now = new Date().toISOString()
   const certificates = authors.map((a, i) => {
     const prev = rec.certificates.find((c) => c.authorEmail === a.email)
     return nameChanged.has(i) || !prev ? { authorEmail: a.email, name: a.name, date: now, version: (prev?.version ?? 0) + 1, generatedAt: now } : prev
   })
-  pstore().patch({ records: { ...pstore().records, [r.paperId]: { ...rec, authors, blocks, finalFile, certificates, articleVersion: version.n } } })
+  pstore().patch({ records: { ...pstore().records, [r.paperId]: { ...rec, authors, blocks, finalFile, certificates, abstract, keywords, manuscript, ...(title ? { title } : {}), articleVersion: version.n } } })
+  if (title) useDataStore.getState().patch({ papers: store().papers.map((p) => (p.id === r.paperId ? { ...p, title } : p)) })
   useDataStore.getState().patch({ authorsOverride: { ...store().authorsOverride, [r.paperId]: authors } })
   setPaperStatus(r.paperId, 'corrected', `Published ${CHANGE_TYPE_META[r.type].label.toLowerCase()} (version ${version.n})`, version.summary)
   addDeposit(r.paperId, 're_deposited')

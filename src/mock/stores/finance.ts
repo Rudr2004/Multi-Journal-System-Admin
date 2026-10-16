@@ -2,11 +2,16 @@ import { create } from 'zustand'
 import type { Payment } from '@/shared/types'
 import { useDataStore } from '../store'
 import { registerReset } from '../reset'
-import { buildReferrals, creditNoteNo, type CreditNote, type ReferralCredit } from '../data/financeExtra'
+import type { JournalCode } from '@/shared/types'
+import { DEFAULT_REFERRAL_AMOUNTS, REFERRER_PROFILES, buildReferrals, creditNoteNo, type CreditNote, type ReferralCredit, type ReferrerProfile } from '../data/financeExtra'
 
 interface FinanceState {
   creditNotes: CreditNote[]
   referrals: ReferralCredit[]
+  /** Referee phone and UPI ID, by email. */
+  profiles: Record<string, ReferrerProfile>
+  /** Referral credit amount per journal (INR). */
+  amounts: Record<JournalCode, number>
   reset: () => void
   patch: (p: Partial<Omit<FinanceState, 'reset' | 'patch'>>) => void
 }
@@ -66,7 +71,7 @@ export function toCreditNote(p: Payment, id: string, reason: string, issuedAt: s
 
 function seed() {
   const creditNotes = applyPaymentDemoSeed()
-  return { creditNotes, referrals: buildReferrals(useDataStore.getState().papers) }
+  return { creditNotes, referrals: buildReferrals(useDataStore.getState().papers), profiles: structuredClone(REFERRER_PROFILES), amounts: { ...DEFAULT_REFERRAL_AMOUNTS } }
 }
 
 export const useFinanceStore = create<FinanceState>((set) => ({

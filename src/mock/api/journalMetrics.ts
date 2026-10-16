@@ -1,6 +1,6 @@
 import type { JournalCode, Paper, PaperStatus } from '@/shared/types'
 import { currentActor, recordAudit } from '../actions'
-import { LISTING_LABEL, SYSTEM_STATS, type JournalMetricsConfig } from '../data/metrics'
+import { LISTING_LABEL, SYSTEM_STATS, sjifForYear, type JournalMetricsConfig } from '../data/metrics'
 import { useDataStore } from '../store'
 import { useMetricsStore } from '../stores/metrics'
 import { delay } from './latency'
@@ -52,20 +52,31 @@ export async function getJournalMetrics(journal: JournalCode): Promise<{ config:
 }
 
 const label = (key: string, c: JournalMetricsConfig) =>
-  key === 'sjif' ? 'SJIF' : key.startsWith('rating:') ? (c.ratings.find((r) => `rating:${r.id}` === key)?.name ?? key) : (SYSTEM_STATS.find((s) => s.key === key)?.label ?? key)
+  key === 'sjif' ? 'SJIF' : key.startsWith('custom:') ? (c.customStats.find((x) => `custom:${x.id}` === key)?.label ?? key) : key.startsWith('rating:') ? (c.ratings.find((r) => `rating:${r.id}` === key)?.name ?? key) : (SYSTEM_STATS.find((s) => s.key === key)?.label ?? key)
 
 /** Human-readable differences, used for the audit entry. */
 export function diffMetrics(a: JournalMetricsConfig, b: JournalMetricsConfig): string[] {
   const out: string[] = []
-  if (a.sjif.value !== b.sjif.value || a.sjif.year !== b.sjif.year) out.push(`SJIF: ${a.sjif.value ? `${a.sjif.value} (${a.sjif.year})` : 'none'} -> ${b.sjif.value ? `${b.sjif.value} (${b.sjif.year})` : 'none'}`)
-  if (a.sjif.link !== b.sjif.link) out.push('SJIF evidence link changed')
-  if (a.sjif.certificate !== b.sjif.certificate) out.push(`SJIF certificate: ${b.sjif.certificate || 'removed'}`)
+  for (const y of b.sjifYears) {
+    const o = a.sjifYears.find((x) => x.id === y.id)
+    if (!o) out.push(`SJIF ${y.year || 'new year'} added: ${y.value || 'no value'}`)
+    else if (o.year !== y.year || o.value !== y.value) out.push(`SJIF ${o.year} -> ${y.year}: ${o.value || 'none'} -> ${y.value || 'none'}`)
+    else if (o.link !== y.link) out.push(`SJIF ${y.year} evidence link changed`)
+    else if (o.certificate !== y.certificate) out.push(`SJIF ${y.year} certificate: ${y.certificate || 'removed'}`)
+  }
+  for (const y of a.sjifYears) if (!b.sjifYears.some((x) => x.id === y.id)) out.push(`SJIF ${y.year} removed (${y.value})`)
   for (const r of b.ratings) {
     const o = a.ratings.find((x) => x.id === r.id)
     if (!o) out.push(`Rating added: ${r.name} ${r.value}`)
     else if (JSON.stringify(o) !== JSON.stringify(r)) out.push(`Rating edited: ${r.name} ${o.value} -> ${r.value}`)
   }
   for (const r of a.ratings) if (!b.ratings.some((x) => x.id === r.id)) out.push(`Rating deleted: ${r.name}`)
+  for (const x of b.customStats) {
+    const o = a.customStats.find((y) => y.id === x.id)
+    if (!o) out.push(`Custom statistic added: ${x.label || 'unnamed'} = ${x.value}`)
+    else if (o.label !== x.label || o.value !== x.value || o.unit !== x.unit) out.push(`Custom statistic edited: ${o.label} ${o.value}${o.unit ? ' ' + o.unit : ''} -> ${x.label} ${x.value}${x.unit ? ' ' + x.unit : ''}`)
+  }
+  for (const o of a.customStats) if (!b.customStats.some((x) => x.id === o.id)) out.push(`Custom statistic removed: ${o.label}`)
   const vis = (list: JournalMetricsConfig['home'], where: string, c: JournalMetricsConfig, prev: JournalMetricsConfig['home']) => {
     for (const p of list) {
       const o = prev.find((x) => x.key === p.key)
@@ -77,12 +88,20 @@ export function diffMetrics(a: JournalMetricsConfig, b: JournalMetricsConfig): s
   vis(b.table, 'statistics table', b, a.table)
   for (const l of b.logos) {
     const o = a.logos.find((x) => x.id === l.id)
-    if (!o) continue
+    if (!o) { out.push(`Indexing logo added: ${l.name || 'unnamed'}`); continue }
+    if (o.name !== l.name) out.push(`Indexing logo renamed: ${o.name} -> ${l.name}`)
+    if ((o.image?.name ?? '') !== (l.image?.name ?? '')) out.push(`${l.name} logo image ${l.image ? 'changed' : 'removed'}`)
     if (o.status !== l.status) out.push(`${l.name} status: ${LISTING_LABEL[o.status]} -> ${LISTING_LABEL[l.status]}`)
     if (o.show !== l.show) out.push(`${l.name} logo: ${o.show ? 'Shown' : 'Hidden'} -> ${l.show ? 'Shown' : 'Hidden'}`)
     if (o.verifyUrl !== l.verifyUrl) out.push(`${l.name} verify link changed`)
   }
+  for (const o of a.logos) if (!b.logos.some((x) => x.id === o.id)) out.push(`Indexing logo removed: ${o.name}`)
   return out
+}
+
+/** SJIF impact factor for a publication year (used by Backdated Publications). */
+export function getSjifForYear(journal: JournalCode, year: number) {
+  return sjifForYear(useMetricsStore.getState().configs[journal].sjifYears, year)
 }
 
 export async function saveJournalMetrics(journal: JournalCode, next: JournalMetricsConfig): Promise<{ changes: number }> {

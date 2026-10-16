@@ -86,13 +86,13 @@ export function usePapersKey(): string {
   return useMemo(() => papers.map((p) => `${p.id}:${p.status}`).join(','), [papers])
 }
 
-/** Issue date versus the real online date, shown wherever an article is backdated. */
-export function IssueVsOnline({ issueDate, onlineDate = new Date().toISOString() }: { issueDate: string; onlineDate?: string }) {
+/** The assigned Issue Publication Date: the only date shown once an article goes live. */
+export function IssueVsOnline({ issueDate }: { issueDate: string; onlineDate?: string }) {
   return (
-    <dl className="grid gap-3 rounded-lg border border-amber-200 bg-amber-50 p-3 sm:grid-cols-2">
-      <div><dt className="text-xs text-amber-900">Issue date (shown on the article)</dt><dd className="mt-0.5 text-sm font-semibold text-amber-950">{formatDate(issueDate)}</dd></div>
-      <div><dt className="text-xs text-amber-900">Actual online date (when it goes live)</dt><dd className="mt-0.5 text-sm font-semibold text-amber-950">{formatDate(onlineDate)}</dd></div>
-      <div className="text-xs text-amber-900 sm:col-span-2"><dd>Both dates are kept on record and sent to Crossref, so the difference stays transparent.</dd></div>
+    <dl className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+      <dt className="text-xs text-amber-900">Issue publication date (shown on the article)</dt>
+      <dd className="mt-0.5 text-sm font-semibold text-amber-950">{formatDate(issueDate)}</dd>
+      <dd className="mt-1 text-xs text-amber-900">The article carries this date everywhere, including Crossref. Today’s date is not used.</dd>
     </dl>
   )
 }
