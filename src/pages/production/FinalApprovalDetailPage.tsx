@@ -13,7 +13,7 @@ import { CertificatePreview } from '@/components/CertificatePreview'
 import { DescriptionList } from '@/components/Form'
 import { useAsync } from '@/lib/useAsync'
 import { cn } from '@/lib/utils'
-import { usePermission } from '@/permissions/hooks'
+import { useCan, usePermission } from '@/permissions/hooks'
 import { useDataStore } from '@/mock/store'
 import { formatDate } from '@/shared/formatters'
 import { doiFor } from '@/shared/paperId'
@@ -55,6 +55,7 @@ function Review({ detail, onPublished }: { detail: ApprovalDetail; onPublished: 
   const { paper, record, issues, backdated } = detail
   const navigate = useNavigate()
   const perm = usePermission('finalApproval')
+  const canIssues = useCan('issues', 'view')
   const allowed = perm.can('approve')
   const issueOptions = useMemo(() => [...issues].sort((a, b) => (a.status === b.status ? a.publicationDate.localeCompare(b.publicationDate) : a.status === 'in_production' ? -1 : 1)), [issues])
   const [issueId, setIssueId] = useState('')
@@ -94,7 +95,7 @@ function Review({ detail, onPublished }: { detail: ApprovalDetail; onPublished: 
     `Deposit DOI ${doiFor(paper.id)} to Crossref.`,
     `Send certificates of publication to ${record.authors.length} author(s) by email.`,
     `Add the paper to ${issue.label} at pages ${pages}.`,
-    ...(backdated ? [`Publish it as a backdated item: issue date ${formatDate(issue.publicationDate)}, actual online date ${formatDate(new Date().toISOString())}.`] : []),
+    `The article shows the assigned issue publication date, ${formatDate(issue.publicationDate)}, not today’s date.`,
     'This cannot be undone. Later changes need a post-publication change request.',
   ] : []
 
@@ -102,7 +103,7 @@ function Review({ detail, onPublished }: { detail: ApprovalDetail; onPublished: 
     <>
       <PageHeader title={paper.id} description={paper.title} crumbs={[{ label: paper.id }]}
         actions={<>
-          <GuardedButton allowed={allowed} why={perm.why('approve')} className="btn-secondary" onClick={() => setReturning(true)}><Undo2 size={15} aria-hidden /> Return to production</GuardedButton>
+          <GuardedButton allowed={allowed} why={perm.why('approve')} className="btn-secondary" onClick={() => setReturning(true)}><Undo2 size={15} aria-hidden /> Return to Associate Editor</GuardedButton>
           <GuardedButton allowed={allowed && ready} why={why} className="btn-primary" disabled={busy} onClick={() => setConfirm(true)}><Send size={15} aria-hidden /> Publish</GuardedButton>
         </>} />
       <div className="mb-5 flex flex-wrap items-center gap-3 text-sm">
@@ -115,7 +116,7 @@ function Review({ detail, onPublished }: { detail: ApprovalDetail; onPublished: 
       <div className="grid gap-5 xl:grid-cols-[1fr_380px]">
         <div className="min-w-0 space-y-3">
           <h2 className="text-[16px] font-semibold">Article page preview</h2>
-          <ArticlePagePreview record={record} journal={paper.journal} paperId={paper.id} articleType={paper.articleType} issueLabel={issue?.label} pages={pages} publishedOn={backdated && issue ? issue.publicationDate : undefined} />
+          <ArticlePagePreview record={record} journal={paper.journal} paperId={paper.id} articleType={paper.articleType} issueLabel={issue?.label} pages={pages} publishedOn={issue?.publicationDate} />
         </div>
         <div className="space-y-5">
           <SectionCard title="Approval checklist">
@@ -132,7 +133,7 @@ function Review({ detail, onPublished }: { detail: ApprovalDetail; onPublished: 
 
           <SectionCard title="Publish into issue">
             {issueOptions.length === 0 ? (
-              <p className="text-sm text-muted">There is no open or in-production issue for {paper.journal}. Create one under <Link to="/issues" className="text-accent hover:underline">Volumes & issues</Link>.</p>
+              <p className="text-sm text-muted">There is no open or in-production issue for {paper.journal}. {canIssues ? <>Create one under <Link to="/issues" className="text-accent hover:underline">Volumes & issues</Link>.</> : 'Ask a Super Admin to create one.'}</p>
             ) : (
               <div className="space-y-3">
                 <div>
@@ -150,7 +151,7 @@ function Review({ detail, onPublished }: { detail: ApprovalDetail; onPublished: 
                       { label: 'Articles already in issue', value: issue.articleIds.length },
                       { label: 'Pages assigned to this article', value: pages },
                     ]} />
-                    {backdated && <IssueVsOnline issueDate={issue.publicationDate} />}
+                    <IssueVsOnline issueDate={issue.publicationDate} />
                   </>
                 )}
               </div>
@@ -167,7 +168,7 @@ function Review({ detail, onPublished }: { detail: ApprovalDetail; onPublished: 
       </div>
 
       <ConfirmDialog open={confirm} onClose={() => setConfirm(false)} onConfirm={publish} title={`Publish ${paper.id}?`} confirmLabel="Publish now" consequences={consequences} />
-      <ReasonDialog open={returning} onClose={() => setReturning(false)} onSubmit={sendBack} title="Return to production" label="Note to production (required)" confirmLabel="Return to production" danger
+      <ReasonDialog open={returning} onClose={() => setReturning(false)} onSubmit={sendBack} title="Return to Associate Editor" label="Note to the Associate Editor (required)" confirmLabel="Return to Associate Editor" danger
         description="The Associate Editor sees this note at the top of the workspace and must address it before resending."
         consequences={['The paper moves back to “Returned to production”.', 'The note is stored on the paper timeline and audit log.']} />
     </>
@@ -175,6 +176,7 @@ function Review({ detail, onPublished }: { detail: ApprovalDetail; onPublished: 
 }
 
 function PublishedResult({ detail, record }: { detail: ApprovalDetail; record: ProductionRecord }) {
+  const canIssues = useCan('issues', 'view')
   const { paper } = detail
   const pub = record.publication!
   const dep = useDataStore((s) => s.deposits.find((d) => d.paperId === paper.id))
@@ -182,7 +184,7 @@ function PublishedResult({ detail, record }: { detail: ApprovalDetail; record: P
   const cert = record.certificates[0]
   const rows = [
     { icon: Globe2, title: 'Article page is live', body: <span className="break-all font-mono text-xs">{pub.url}</span> },
-    { icon: Library, title: `Added to ${pub.issueLabel}`, body: <>Pages {pub.pages}. <Link to="/issues" className="text-accent hover:underline">Open Volumes & issues</Link></> },
+    { icon: Library, title: `Added to ${pub.issueLabel}`, body: <>Pages {pub.pages}.{canIssues && <> <Link to="/issues" className="text-accent hover:underline">Open Volumes & issues</Link></>}</> },
     { icon: FileCheck2, title: 'DOI deposited to Crossref', body: <><span className="font-mono text-xs">{pub.doi}</span> · deposit v{dep?.version ?? pub.depositVersion} ({dep?.status ?? 'success'}). <Link to="/doi" className="text-accent hover:underline">View deposits</Link></> },
     { icon: Mail, title: `Certificates sent to ${pub.certificatesSent.length} recipient(s)`, body: pub.certificatesSent.join(', ') },
   ]
@@ -194,7 +196,7 @@ function PublishedResult({ detail, record }: { detail: ApprovalDetail; record: P
         <BadgeCheck size={22} className="mt-0.5 shrink-0 text-green-600" aria-hidden />
         <div>
           <p className="text-base font-semibold text-green-900">Published successfully</p>
-          <p className="text-sm text-green-800">{pub.by} published this article on {formatDate(pub.at)}. Here is what happened.</p>
+          <p className="text-sm text-green-800">{pub.by} published this article{issue ? ` with the issue publication date ${formatDate(issue.publicationDate)}` : ''}. Here is what happened.</p>
         </div>
       </div>
       <div className="grid gap-5 lg:grid-cols-[1fr_380px]">
@@ -204,7 +206,7 @@ function PublishedResult({ detail, record }: { detail: ApprovalDetail; record: P
               <li key={r.title} className="flex gap-3 px-4 py-3"><r.icon size={18} className="mt-0.5 shrink-0 text-green-600" aria-hidden /><div className="min-w-0"><p className="text-sm font-medium">{r.title}</p><p className="mt-0.5 text-sm text-muted">{r.body}</p></div></li>
             ))}
           </ul>
-          {pub.backdated && issue && <div className="border-t border-line p-4"><IssueVsOnline issueDate={issue.publicationDate} onlineDate={pub.at} /></div>}
+          {issue && <div className="border-t border-line p-4"><IssueVsOnline issueDate={issue.publicationDate} /></div>}
         </SectionCard>
         {cert && <SectionCard title="Certificate sent to authors"><CertificatePreview authorName={cert.name} paperTitle={record.title} paperId={paper.id} journal={paper.journal} date={cert.date} doi={pub.doi} /></SectionCard>}
       </div>

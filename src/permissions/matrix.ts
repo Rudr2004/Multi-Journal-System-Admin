@@ -45,7 +45,7 @@ const TABLE: Record<Area, Row> = {
   submissions: [V, M, W, N, N, V], // Manuscript Submissions (Editor) / Assigned Manuscripts (AE, assigned only)
   reviewMgmt: [N, M, N, N, N, N],
   myReviews: [N, N, N, W, W, N], // Review Submissions (Reviewer) / Review Assignments (Panel Member)
-  reviewAssign: [N, N, N, V, N, N], // Reviewer: read-only list of external review assignments
+  reviewAssign: [N, N, N, W, N, N], // Reviewer: external review assignments; can reassign to another Review Panel Member
   production: [N, V, W, N, N, N],
   finalApproval: [N, A, N, N, N, N], // publish / Return to Production
   backdated: [N, M, W, N, N, N], // AE = production step only
@@ -55,7 +55,7 @@ const TABLE: Record<Area, Row> = {
   awards: [V, M, N, N, N, N],
   awardApproval: [A, N, N, N, N, N],
   // Publishing (Super Admin: Journal & Issue Management)
-  issues: [M, M, N, N, N, N],
+  issues: [M, N, N, N, N, N],
   doi: [M, N, N, N, N, N],
   certificates: [M, N, W, N, N, N],
   // Finance

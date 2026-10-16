@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { z } from 'zod'
-import { Lock, RotateCcw, ShieldCheck } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, Code2, FileText, Lock, Monitor, RotateCcw, ShieldCheck, Smartphone, Trash2, Wand2, XCircle } from 'lucide-react'
 import { Badge } from '@/components/Badges'
 import { EmailPreview } from '@/components/EmailPreview'
 import { FormField } from '@/components/Form'
@@ -11,9 +11,11 @@ import { useUnsavedChanges } from '@/lib/useUnsavedChanges'
 import { cn } from '@/lib/utils'
 import { formatDate } from '@/shared/formatters'
 import { useDataStore } from '@/mock/store'
-import { saveEmailTemplate } from '@/mock/api/templates'
+import { deleteHtmlLayout, saveEmailTemplate, saveHtmlLayout } from '@/mock/api/templates'
+import { useCommStore } from '@/mock/stores/communication'
+import { STARTER_HTML, lintEmailHtml } from '@/mock/data/emailHtml'
 import {
-  TEMPLATE_EVENTS, TEMPLATE_VARIABLES, paperVars, renderText, sampleVars, unknownVariables, usedVariables,
+  TEMPLATE_EVENTS, TEMPLATE_VARIABLES, paperVars, renderAny, renderText, sampleVars, unknownVariables, unknownVariablesAny, usedVariables,
   type MessageTemplate,
 } from '@/mock/data/communication'
 import { CHANNEL_LABEL, ChannelBadge } from './parts'
@@ -22,22 +24,26 @@ const unknownRule = (field: string) => (v: string, ctx: z.RefinementCtx) => {
   const bad = unknownVariables(v)
   if (bad.length) ctx.addIssue({ code: 'custom', message: `Unknown variable${bad.length > 1 ? 's' : ''} in ${field}: ${bad.map((b) => `{{${b}}}`).join(', ')}` })
 }
+const unknownAnyRule = (field: string) => (v: string, ctx: z.RefinementCtx) => {
+  const bad = unknownVariablesAny(v)
+  if (bad.length) ctx.addIssue({ code: 'custom', message: `Unknown placeholder${bad.length > 1 ? 's' : ''} in ${field}: ${bad.map((b) => `{${b}}`).join(', ')}` })
+}
 const unbalanced = (v: string) => (v.match(/\{\{/g)?.length ?? 0) === (v.match(/\}\}/g)?.length ?? 0)
 
 const emailSchema = z.object({
-  subject: z.string().trim().min(5, 'Subject must be at least 5 characters').max(150, 'Subject is too long (150 max)').superRefine(unknownRule('subject')).refine(unbalanced, 'Check the braces: every {{ needs a closing }}'),
+  subject: z.string().trim().min(5, 'Subject must be at least 5 characters').max(150, 'Subject is too long (150 max)').superRefine(unknownAnyRule('subject')).refine(unbalanced, 'Check the braces: every {{ needs a closing }}'),
   body: z.string().trim().min(40, 'Body must be at least 40 characters').superRefine(unknownRule('body')).refine(unbalanced, 'Check the braces: every {{ needs a closing }}'),
 })
 
-function VariableChips({ onInsert, disabled }: { onInsert: (key: string) => void; disabled?: boolean }) {
+function VariableChips({ onInsert, disabled, single }: { onInsert: (key: string) => void; disabled?: boolean; single?: boolean }) {
   return (
     <div>
-      <p className="label">Insert variable</p>
+      <p className="label">Insert placeholder</p>
       <div className="flex flex-wrap gap-1.5">
         {TEMPLATE_VARIABLES.map((v) => (
           <button key={v.key} type="button" disabled={disabled} title={`${v.label}, e.g. ${v.sample}`} onClick={() => onInsert(v.key)}
             className="rounded-md border border-line bg-subtle px-2 py-0.5 font-mono text-xs text-ink hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:opacity-50">
-            {`{{${v.key}}}`}
+            {single ? `{${v.key}}` : `{{${v.key}}}`}
           </button>
         ))}
       </div>
@@ -94,9 +100,16 @@ export function TemplateEditor({ template, canEdit, why, onDirty, onSaved }: {
   const [touched, setTouched] = useState(false)
   const [saving, setSaving] = useState(false)
   const [previewId, setPreviewId] = useState('sample')
+  const [format, setFormat] = useState<'text' | 'html'>(template.format ?? 'text')
+  const [html, setHtml] = useState(template.html ?? '')
+  const [device, setDevice] = useState<'desktop' | 'mobile'>('desktop')
+  const [htmlFocused, setHtmlFocused] = useState(false)
+  const [layoutId, setLayoutId] = useState('')
+  const layouts = useCommStore((st) => st.htmlLayouts)
+  const htmlRef = useRef<HTMLTextAreaElement>(null)
   const subjectRef = useRef<HTMLInputElement>(null)
   const bodyRef = useRef<HTMLTextAreaElement>(null)
-  const lastField = useRef<'subject' | 'body'>('body')
+  const lastField = useRef<'subject' | 'body' | 'html'>('body')
 
   const papers = useScoped(useDataStore((s) => s.papers))
   const previewPapers = useMemo(() => papers.slice(0, 4), [papers])
@@ -106,7 +119,7 @@ export function TemplateEditor({ template, canEdit, why, onDirty, onSaved }: {
   }, [previewId, previewPapers])
 
   const isEmail = template.channel === 'email'
-  const dirty = isEmail && (subject !== (template.subject ?? '') || body !== template.body)
+  const dirty = isEmail && (subject !== (template.subject ?? '') || body !== template.body || format !== (template.format ?? 'text') || (format === 'html' && html !== (template.html ?? '')))
   useUnsavedChanges(dirty)
   useEffect(() => { onDirty(dirty) }, [dirty, onDirty])
   useEffect(() => () => onDirty(false), [onDirty])
@@ -119,23 +132,25 @@ export function TemplateEditor({ template, canEdit, why, onDirty, onSaved }: {
   }, [parsed])
 
   const insert = (key: string) => {
-    const token = `{{${key}}}`
-    const el = lastField.current === 'subject' ? subjectRef.current : bodyRef.current
-    const cur = lastField.current === 'subject' ? subject : body
+    const inHtml = format === 'html' && lastField.current === 'html'
+    const token = inHtml ? `{${key}}` : `{{${key}}}`
+    const el = lastField.current === 'subject' ? subjectRef.current : inHtml ? htmlRef.current : bodyRef.current
+    const cur = lastField.current === 'subject' ? subject : inHtml ? html : body
     const start = el?.selectionStart ?? cur.length
     const end = el?.selectionEnd ?? cur.length
     const next = cur.slice(0, start) + token + cur.slice(end)
     if (lastField.current === 'subject') setSubject(next)
+    else if (inHtml) setHtml(next)
     else setBody(next)
     requestAnimationFrame(() => { el?.focus(); el?.setSelectionRange(start + token.length, start + token.length) })
   }
 
   const save = async () => {
     setTouched(true)
-    if (!parsed.success) return
+    if (!parsed.success || htmlError) return
     setSaving(true)
     try {
-      await saveEmailTemplate(template.id, { subject: subject.trim(), body: body.trim() })
+      await saveEmailTemplate(template.id, { subject: subject.trim(), body: body.trim(), format, html: format === 'html' ? html : undefined })
       toast.success(`"${event.label}" email template saved`)
       onSaved()
     } catch (e) {
@@ -145,8 +160,44 @@ export function TemplateEditor({ template, canEdit, why, onDirty, onSaved }: {
     }
   }
 
-  const rSubject = renderText(subject, vars)
+  const rSubject = renderAny(subject, vars)
   const rBody = renderText(body, vars)
+  const rHtml = useMemo(() => renderAny(html, vars), [html, vars])
+  const checks = useMemo(() => (format === 'html' ? lintEmailHtml(html) : []), [format, html])
+  const htmlError = ((): string | undefined => {
+    if (format !== 'html') return undefined
+    if (html.trim().length < 60) return 'Enter your HTML (at least 60 characters), or use “Insert responsive layout” to start.'
+    if (/<script[\s>]/i.test(html)) return 'Remove <script>: email clients block scripts.'
+    const bad = unknownVariablesAny(html)
+    if (bad.length) return `Unknown placeholder${bad.length > 1 ? 's' : ''}: ${bad.map((x) => `{${x}}`).join(', ')}`
+    return undefined
+  })()
+
+  const insertStarter = () => {
+    if (html.trim() && !window.confirm('Replace the HTML in the editor with the responsive starter layout?')) return
+    setHtml(STARTER_HTML)
+  }
+  const applyLayout = () => {
+    const l = layouts.find((x) => x.id === layoutId)
+    if (!l) return
+    if (html.trim() && html !== l.html && !window.confirm(`Replace the HTML in the editor with "${l.name}"?`)) return
+    setHtml(l.html)
+    toast.info(`Applied "${l.name}". Save the template to keep it.`)
+  }
+  const saveLayout = async () => {
+    const name = window.prompt('Name this layout so you can reuse it for other notifications')
+    if (!name) return
+    try {
+      const l = await saveHtmlLayout(name, html)
+      setLayoutId(l.id)
+      toast.success(`Layout "${l.name}" saved for reuse`)
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Could not save the layout') }
+  }
+  const removeLayout = async () => {
+    const l = layouts.find((x) => x.id === layoutId)
+    if (!l || !window.confirm(`Delete the saved layout "${l.name}"? Templates already using it keep their HTML.`)) return
+    try { await deleteHtmlLayout(l.id); setLayoutId(''); toast.success('Layout deleted') } catch (e) { toast.error(e instanceof Error ? e.message : 'Could not delete the layout') }
+  }
 
   return (
     <div className="space-y-5">
@@ -177,12 +228,64 @@ export function TemplateEditor({ template, canEdit, why, onDirty, onSaved }: {
           {isEmail ? (
             <>
               <FormField label="Subject" required error={touched ? errors.subject : undefined}>
-                {(p) => <input {...p} ref={subjectRef} className="input" value={subject} readOnly={!canEdit} onFocus={() => (lastField.current = 'subject')} onChange={(e) => setSubject(e.target.value)} onBlur={() => setTouched(true)} />}
+                {(p) => <input {...p} ref={subjectRef} className="input" value={subject} readOnly={!canEdit} onFocus={() => { lastField.current = 'subject'; setHtmlFocused(false) }} onChange={(e) => setSubject(e.target.value)} onBlur={() => setTouched(true)} />}
               </FormField>
-              <FormField label="Body" required error={touched ? errors.body : undefined} hint="Plain text. Variables are replaced with each paper’s data when the email is sent.">
-                {(p) => <textarea {...p} ref={bodyRef} rows={14} className="input !h-auto py-2 font-mono text-[13px] leading-6" value={body} readOnly={!canEdit} onFocus={() => (lastField.current = 'body')} onChange={(e) => setBody(e.target.value)} onBlur={() => setTouched(true)} />}
-              </FormField>
-              <VariableChips onInsert={insert} disabled={!canEdit} />
+              <div role="radiogroup" aria-label="Email format" className="inline-flex rounded-lg bg-subtle p-0.5">
+                {([['text', 'Plain text', FileText], ['html', 'HTML code', Code2]] as const).map(([v, label, Icon]) => (
+                  <button key={v} type="button" role="radio" aria-checked={format === v} disabled={!canEdit} onClick={() => setFormat(v)}
+                    className={cn('inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium disabled:cursor-not-allowed', format === v ? 'bg-surface text-ink shadow-sm' : 'text-muted hover:text-ink')}>
+                    <Icon size={14} strokeWidth={1.5} aria-hidden /> {label}
+                  </button>
+                ))}
+              </div>
+
+              {format === 'text' ? (
+                <FormField label="Body" required error={touched ? errors.body : undefined} hint="Plain text. Placeholders are replaced with each paper’s data when the email is sent.">
+                  {(p) => <textarea {...p} ref={bodyRef} rows={14} className="input !h-auto py-2 font-mono text-[13px] leading-6" value={body} readOnly={!canEdit} onFocus={() => { lastField.current = 'body'; setHtmlFocused(false) }} onChange={(e) => setBody(e.target.value)} onBlur={() => setTouched(true)} />}
+                </FormField>
+              ) : (
+                <>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button type="button" className="btn-secondary !h-8" disabled={!canEdit} onClick={insertStarter}><Wand2 size={14} strokeWidth={1.5} aria-hidden /> Insert responsive layout</button>
+                    <select aria-label="Saved layouts" className="input !h-8 !w-auto max-w-[200px]" value={layoutId} onChange={(e) => setLayoutId(e.target.value)}>
+                      <option value="">Saved layouts…</option>
+                      {layouts.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+                    </select>
+                    <button type="button" className="btn-secondary !h-8" disabled={!canEdit || !layoutId} onClick={applyLayout}>Use layout</button>
+                    <button type="button" className="btn-ghost !h-8 text-red-600" disabled={!canEdit || !layoutId} aria-label="Delete saved layout" onClick={removeLayout}><Trash2 size={14} strokeWidth={1.5} aria-hidden /></button>
+                    <button type="button" className="btn-ghost !h-8 ml-auto" disabled={!canEdit || !html.trim()} onClick={saveLayout}>Save as reusable layout</button>
+                  </div>
+                  <FormField label="HTML code" required error={touched ? htmlError : undefined} hint="Write or paste your own HTML. Use table layouts and inline styles for the best results in Gmail and Outlook.">
+                    {(p) => (
+                      <textarea {...p} ref={htmlRef} rows={20} spellCheck={false} wrap="off" readOnly={!canEdit} value={html}
+                        className="block w-full resize-y rounded-md border border-slate-700 bg-slate-950 p-3 font-mono text-[12.5px] leading-5 text-slate-100 outline-none focus:ring-2 focus:ring-accent"
+                        onFocus={() => { lastField.current = 'html'; setHtmlFocused(true) }} onChange={(e) => setHtml(e.target.value)} onBlur={() => setTouched(true)} />
+                    )}
+                  </FormField>
+                  <p className="-mt-2 text-right text-xs tabular-nums text-muted">{html.split('\n').length} lines · {html.length.toLocaleString('en-IN')} characters</p>
+                  <section aria-label="Email client compatibility" className="rounded-lg border border-line p-3">
+                    <p className="mb-2 text-sm font-medium">Compatibility check <span className="font-normal text-muted">· {checks.filter((c) => c.level === 'pass').length} of {checks.length} passed</span></p>
+                    <ul className="space-y-1.5 text-sm">
+                      {checks.map((c) => (
+                        <li key={c.id} className="flex items-start gap-2">
+                          {c.level === 'pass' ? <CheckCircle2 size={15} className="mt-0.5 shrink-0 text-green-600" aria-hidden /> : c.level === 'warn' ? <AlertTriangle size={15} className="mt-0.5 shrink-0 text-amber-600" aria-hidden /> : <XCircle size={15} className="mt-0.5 shrink-0 text-red-600" aria-hidden />}
+                          <span><span className={c.level === 'pass' ? 'text-muted' : 'font-medium'}>{c.label}</span>{c.detail && <span className="block text-xs text-muted">{c.detail}</span>}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+                  <details className="rounded-lg border border-line p-3">
+                    <summary className="cursor-pointer text-sm font-medium">Plain-text version <span className="font-normal text-muted">(shown by email clients that cannot display HTML)</span></summary>
+                    <div className="mt-3">
+                      <FormField label="Plain-text body" required error={touched ? errors.body : undefined}>
+                        {(p) => <textarea {...p} ref={bodyRef} rows={8} className="input !h-auto py-2 font-mono text-[13px] leading-6" value={body} readOnly={!canEdit} onFocus={() => { lastField.current = 'body'; setHtmlFocused(false) }} onChange={(e) => setBody(e.target.value)} onBlur={() => setTouched(true)} />}
+                      </FormField>
+                    </div>
+                  </details>
+                </>
+              )}
+              <VariableChips onInsert={insert} disabled={!canEdit} single={format === 'html' && htmlFocused} />
+              {format === 'html' && <p className="-mt-2 text-xs text-muted">Both <span className="font-mono">{'{author_name}'}</span> and <span className="font-mono">{'{{author_name}}'}</span> work. Click inside the HTML box first to insert a placeholder there.</p>}
             </>
           ) : (
             <>
@@ -212,7 +315,26 @@ export function TemplateEditor({ template, canEdit, why, onDirty, onSaved }: {
             </label>
           </div>
           {isEmail ? (
-            <EmailPreview to={vars.author_name ? `${vars.author_name.toLowerCase().replace(/\s+/g, '.')}@university.example` : 'author@university.example'} subject={rSubject || '(no subject)'} body={rBody || '(empty body)'} />
+            format === 'html' ? (
+              <figure aria-label="HTML email preview" className="overflow-hidden rounded-lg border border-line bg-slate-100">
+                <figcaption className="flex flex-wrap items-center justify-between gap-2 border-b border-line bg-page px-3 py-2 text-xs text-muted">
+                  <span className="truncate"><span className="font-medium text-ink">{rSubject || '(no subject)'}</span></span>
+                  <span role="group" aria-label="Preview width" className="inline-flex rounded-md bg-subtle p-0.5">
+                    {([['desktop', 'Desktop', Monitor], ['mobile', 'Mobile', Smartphone]] as const).map(([v, label, Icon]) => (
+                      <button key={v} type="button" aria-pressed={device === v} onClick={() => setDevice(v)} className={cn('inline-flex items-center gap-1 rounded px-2 py-1', device === v ? 'bg-surface font-medium text-ink shadow-sm' : 'hover:text-ink')}><Icon size={13} aria-hidden /> {label}</button>
+                    ))}
+                  </span>
+                </figcaption>
+                <div className="flex justify-center p-3">
+                  {html.trim() ? (
+                    <iframe title="Email preview" sandbox="" srcDoc={rHtml} className="h-[560px] rounded border border-line bg-white" style={{ width: device === 'mobile' ? 375 : '100%', maxWidth: '100%' }} />
+                  ) : <p className="py-16 text-center text-sm text-muted">Nothing to preview yet. Write some HTML or insert the responsive layout.</p>}
+                </div>
+                <p className="border-t border-line bg-page px-3 py-1.5 text-xs text-muted">Placeholders show the sample data selected above. Scripts are blocked in the preview, as in real email clients.</p>
+              </figure>
+            ) : (
+              <EmailPreview to={vars.author_name ? `${vars.author_name.toLowerCase().replace(/\s+/g, '.')}@university.example` : 'author@university.example'} subject={rSubject || '(no subject)'} body={rBody || '(empty body)'} />
+            )
           ) : (
             <>
               <Phone tone={template.channel === 'whatsapp' ? 'whatsapp' : 'sms'}>
@@ -228,8 +350,8 @@ export function TemplateEditor({ template, canEdit, why, onDirty, onSaved }: {
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4">
           <p className="text-xs text-muted">Last edited by {template.updatedBy}, {formatDate(template.updatedAt)}{dirty && <span className="ml-2 font-medium text-amber-700">Unsaved changes</span>}</p>
           <div className="flex gap-2">
-            <button className="btn-secondary" disabled={!dirty || saving} onClick={() => { setSubject(template.subject ?? ''); setBody(template.body); setTouched(false) }}><RotateCcw size={14} strokeWidth={1.5} aria-hidden /> Discard changes</button>
-            <GuardedButton allowed={canEdit} why={why} className="btn-primary" disabled={!dirty || saving || (touched && !parsed.success)} onClick={save}>{saving ? 'Saving…' : 'Save template'}</GuardedButton>
+            <button className="btn-secondary" disabled={!dirty || saving} onClick={() => { setSubject(template.subject ?? ''); setBody(template.body); setFormat(template.format ?? 'text'); setHtml(template.html ?? ''); setTouched(false) }}><RotateCcw size={14} strokeWidth={1.5} aria-hidden /> Discard changes</button>
+            <GuardedButton allowed={canEdit} why={why} className="btn-primary" disabled={!dirty || saving || (touched && (!parsed.success || !!htmlError))} onClick={save}>{saving ? 'Saving…' : 'Save template'}</GuardedButton>
           </div>
         </div>
       )}

@@ -1,44 +1,89 @@
 import { useState } from 'react'
-import { CheckCircle2, Pencil, Plus, Trash2, XCircle } from 'lucide-react'
+import { CheckCircle2, ImagePlus, Pencil, Plus, Trash2, XCircle } from 'lucide-react'
+import { toast } from '@/components/Toasts'
+import { UserAvatar } from '@/components/UserAvatar'
 import { cn } from '@/lib/utils'
 import { wordCount, type CheckItem, type ProductionRecord } from '@/mock/data/production'
 
-export type Draft = Pick<ProductionRecord, 'title' | 'authors' | 'abstract' | 'keywords' | 'references' | 'blocks' | 'seo' | 'returnAcknowledged'>
+export type Draft = Pick<ProductionRecord, 'title' | 'authors' | 'abstract' | 'keywords' | 'references' | 'blocks' | 'seo' | 'returnAcknowledged' | 'citeInPrint'>
 
-function Editor({ item, draft, update }: { item: CheckItem; draft: Draft; update: (p: Partial<Draft>) => void }) {
+type Original = ProductionRecord['manuscript']
+type Patch = (p: Partial<Draft>) => void
+
+function CopyOriginal({ label, text, onUse }: { label: string; text: string; onUse: () => void }) {
+  return (
+    <div className="mb-2 rounded-md border border-dashed border-line bg-subtle px-3 py-2 text-xs">
+      <p className="font-medium text-muted">{label}</p>
+      <p className="mt-0.5 line-clamp-3 text-ink">{text}</p>
+      <button type="button" className="mt-1 text-accent hover:underline" onClick={onUse}>Copy into the field below</button>
+    </div>
+  )
+}
+
+function readPhoto(file: File, done: (url: string) => void) {
+  if (!/^image\/(png|jpe?g|webp)$/.test(file.type)) { toast.error('Choose a PNG, JPG or WebP image.'); return }
+  if (file.size > 2 * 1024 * 1024) { toast.error('The photo must be under 2 MB.'); return }
+  const r = new FileReader()
+  r.onload = () => done(String(r.result))
+  r.readAsDataURL(file)
+}
+
+export function AuthorCards({ authors, onChange }: { authors: Draft['authors']; onChange: (a: Draft['authors']) => void }) {
+  const set = (i: number, p: Partial<Draft['authors'][number]>) => onChange(authors.map((x, j) => (j === i ? { ...x, ...p } : x)))
+  return (
+    <div className="space-y-3">
+      {authors.map((a, i) => (
+        <div key={i} className="rounded-lg border border-line bg-surface p-3">
+          <div className="flex items-start gap-3">
+            <UserAvatar name={a.name || `Author ${i + 1}`} photo={a.photo} size={52} />
+            <div className="grid min-w-0 flex-1 gap-2 sm:grid-cols-2">
+              <input aria-label={`Author ${i + 1} full name`} placeholder="Full name" className="input" value={a.name} onChange={(e) => set(i, { name: e.target.value })} />
+              <input aria-label={`Author ${i + 1} email`} placeholder="Email" type="email" className="input" value={a.email} onChange={(e) => set(i, { email: e.target.value })} />
+              <input aria-label={`Author ${i + 1} affiliation`} placeholder="Department, institution, city" className="input sm:col-span-2" value={a.affiliation} onChange={(e) => set(i, { affiliation: e.target.value })} />
+              <input aria-label={`Author ${i + 1} country`} placeholder="Country" className="input" value={a.country} onChange={(e) => set(i, { country: e.target.value })} />
+              <input aria-label={`Author ${i + 1} ORCID iD`} placeholder="ORCID iD (0000-0000-0000-0000)" className="input font-mono" value={a.orcid ?? ''} onChange={(e) => set(i, { orcid: e.target.value })} />
+              <div className="flex flex-wrap items-center gap-2 sm:col-span-2">
+                <label className="btn-secondary !h-8 cursor-pointer"><ImagePlus size={14} aria-hidden /> {a.photo ? 'Change photo' : 'Add photo'}
+                  <input type="file" accept="image/png,image/jpeg,image/webp" className="sr-only" aria-label={`Author ${i + 1} profile photo`} onChange={(e) => { const f = e.target.files?.[0]; if (f) readPhoto(f, (url) => set(i, { photo: url })); e.target.value = '' }} /></label>
+                {a.photo && <button type="button" className="btn-ghost !h-8 hover:!text-red-600" onClick={() => set(i, { photo: undefined })}><Trash2 size={14} aria-hidden /> Delete photo</button>}
+                <button type="button" aria-label={`Remove author ${i + 1}`} className="btn-ghost !h-8 ml-auto hover:!text-red-600" disabled={authors.length <= 1} onClick={() => onChange(authors.filter((_, j) => j !== i))}><Trash2 size={14} aria-hidden /> Remove author</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ))}
+      <button type="button" className="btn-secondary !h-8" onClick={() => onChange([...authors, { name: '', email: '', affiliation: '', country: '' }])}><Plus size={14} aria-hidden /> Add author</button>
+    </div>
+  )
+}
+
+function Editor({ item, draft, update, original }: { item: CheckItem; draft: Draft; update: Patch; original?: Original }) {
   switch (item.key) {
     case 'title':
       return (
-        <label className="block"><span className="label">Article title</span>
-          <textarea rows={2} className="input !h-auto py-2" value={draft.title} onChange={(e) => update({ title: e.target.value })} /></label>
+        <div>
+          {original && original.title !== draft.title && <CopyOriginal label="Title in the original document" text={original.title} onUse={() => update({ title: original.title })} />}
+          <label className="block"><span className="label">Article title</span>
+            <textarea rows={2} className="input !h-auto py-2" value={draft.title} onChange={(e) => update({ title: e.target.value })} /></label>
+        </div>
       )
     case 'authors':
       return (
-        <div className="space-y-2">
-          {draft.authors.map((a, i) => (
-            <div key={i} className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
-              <input aria-label={`Author ${i + 1} full name`} placeholder="Full name" className="input" value={a.name} onChange={(e) => update({ authors: draft.authors.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)) })} />
-              <input aria-label={`Author ${i + 1} email`} placeholder="Email" type="email" className="input" value={a.email} onChange={(e) => update({ authors: draft.authors.map((x, j) => (j === i ? { ...x, email: e.target.value } : x)) })} />
-              <button type="button" aria-label={`Remove author ${i + 1}`} className="btn-ghost !w-9 !px-0 hover:!text-red-600" disabled={draft.authors.length <= 1} onClick={() => update({ authors: draft.authors.filter((_, j) => j !== i) })}><Trash2 size={15} /></button>
-            </div>
-          ))}
-          <button type="button" className="btn-secondary !h-8" onClick={() => update({ authors: [...draft.authors, { name: '', email: '', affiliation: '', country: '' }] })}><Plus size={14} aria-hidden /> Add author</button>
+        <div>
+          {original && <p className="mb-2 text-xs text-muted">Authors in the original document: <span className="text-ink">{original.authors.join(', ')}</span></p>}
+          <AuthorCards authors={draft.authors} onChange={(authors) => update({ authors })} />
         </div>
       )
     case 'affiliations':
-      return (
-        <div className="space-y-2">
-          {draft.authors.map((a, i) => (
-            <label key={i} className="block"><span className="label">{a.name || `Author ${i + 1}`}</span>
-              <input className="input" placeholder="Department, institution, city" value={a.affiliation} onChange={(e) => update({ authors: draft.authors.map((x, j) => (j === i ? { ...x, affiliation: e.target.value } : x)) })} /></label>
-          ))}
-        </div>
-      )
+      return <AuthorCards authors={draft.authors} onChange={(authors) => update({ authors })} />
     case 'abstract':
       return (
-        <label className="block"><span className="label">Abstract</span>
-          <textarea rows={7} className="input !h-auto py-2 leading-6" value={draft.abstract} onChange={(e) => update({ abstract: e.target.value })} />
-          <span className="mt-0.5 block text-right text-xs tabular-nums text-muted">{wordCount(draft.abstract)} words</span></label>
+        <div>
+          {original && original.abstract !== draft.abstract && <CopyOriginal label="Abstract in the original document" text={original.abstract} onUse={() => update({ abstract: original.abstract })} />}
+          <label className="block"><span className="label">Abstract</span>
+            <textarea rows={7} className="input !h-auto py-2 leading-6" value={draft.abstract} onChange={(e) => update({ abstract: e.target.value })} />
+            <span className="mt-0.5 block text-right text-xs tabular-nums text-muted">{wordCount(draft.abstract)} words</span></label>
+        </div>
       )
     case 'keywords':
       return (
@@ -56,8 +101,8 @@ function Editor({ item, draft, update }: { item: CheckItem; draft: Draft; update
 }
 
 /** Pass/fail checklist; every row can be fixed inline. */
-export function MetadataChecklist({ items, draft, update, readOnly }: { items: CheckItem[]; draft: Draft; update: (p: Partial<Draft>) => void; readOnly: boolean }) {
-  const [open, setOpen] = useState<string | null>(() => items.find((i) => !i.pass)?.key ?? null)
+export function MetadataChecklist({ items, draft, update, readOnly, original, initialOpen }: { items: CheckItem[]; draft: Draft; update: (p: Partial<Draft>) => void; readOnly: boolean; original?: Original; initialOpen?: string }) {
+  const [open, setOpen] = useState<string | null>(() => initialOpen ?? items.find((i) => !i.pass)?.key ?? null)
   const failing = items.filter((i) => !i.pass).length
   return (
     <div>
@@ -79,7 +124,7 @@ export function MetadataChecklist({ items, draft, update, readOnly }: { items: C
                   <Pencil size={13} aria-hidden /> {expanded ? 'Done' : readOnly ? 'View' : 'Edit'}
                 </button>
               </div>
-              {expanded && <div id={`chk-${it.key}`} className="mt-3 pl-7"><fieldset disabled={readOnly} className="min-w-0"><Editor item={it} draft={draft} update={update} /></fieldset></div>}
+              {expanded && <div id={`chk-${it.key}`} className="mt-3 pl-7"><fieldset disabled={readOnly} className="min-w-0"><Editor item={it} draft={draft} update={update} original={original} /></fieldset></div>}
             </li>
           )
         })}

@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { Navigate, Outlet, createBrowserRouter, useLocation } from 'react-router-dom'
 import { AppLayout } from '@/layout/AppLayout'
 import { ALL_NAV_ITEMS } from '@/navigation/nav'
@@ -13,6 +14,8 @@ import { communicationPages } from '@/pages/communication/routes'
 import { websitePages } from '@/pages/website/routes'
 import { insightsPages } from '@/pages/insights/routes'
 import { adminPages } from '@/pages/admin/routes'
+import { ProfilePage } from '@/pages/account/ProfilePage'
+import { useSession } from '@/mock/store'
 import { ComingSoon } from './ComingSoon'
 import { NotFoundPage } from './ErrorPages'
 import type { PageDef } from './pageDef'
@@ -22,13 +25,19 @@ import { useDensityEffect } from './useDensityEffect'
 
 const REGISTERED: PageDef[] = [
   { path: '/', area: 'dashboard', element: <DashboardPage /> },
+  { path: '/profile', area: 'dashboard', element: <ProfilePage /> },
   ...editorialPages, ...productionPages, ...publishingPages, ...financePages,
   ...communicationPages, ...websitePages, ...insightsPages, ...adminPages,
 ]
 
 function AuthGuard() {
   const user = useCurrentUser()
+  const setUser = useSession((s) => s.setUser)
   const loc = useLocation()
+  // Account status is validated on every render of the protected area, not only at sign-in.
+  const blocked = !!user && (user.status === 'suspended' || user.status === 'deactivated')
+  useEffect(() => { if (blocked) setUser(null, 'ALL') }, [blocked, setUser])
+  if (blocked) return <Navigate to="/login" state={{ suspended: user!.status === 'suspended', deactivated: user!.status === 'deactivated' }} replace />
   if (!user) return <Navigate to="/login" state={{ from: loc.pathname }} replace />
   return <Outlet />
 }

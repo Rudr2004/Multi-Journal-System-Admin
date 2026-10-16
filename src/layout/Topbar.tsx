@@ -8,8 +8,8 @@ import { nextDispatch } from '@/mock/data/papers'
 import { useCurrentUser, usePermission, useRole } from '@/permissions/hooks'
 import { ROLE_META } from '@/permissions/roles'
 import { formatDate, formatRelative, formatTime } from '@/shared/formatters'
-import { initials } from '@/lib/utils'
 import { Tooltip } from '@/components/Tooltip'
+import { UserAvatar } from '@/components/UserAvatar'
 import { JournalSwitcher } from './JournalSwitcher'
 import { Popover } from './Popover'
 import { useUi } from './uiStore'
@@ -99,7 +99,7 @@ function UserMenu() {
       align="right" panelClassName="w-72"
       trigger={({ toggle, props }) => (
         <button {...props} onClick={toggle} className="flex items-center gap-2 rounded-md py-1 pl-1 pr-2 hover:bg-subtle" aria-label="User menu">
-          <span className="flex h-8 w-8 items-center justify-center rounded-full bg-accent-soft text-xs font-semibold text-accent">{initials(user.name)}</span>
+          <UserAvatar name={user.name} photo={user.photo} size={32} />
           <span className="hidden whitespace-nowrap text-left leading-tight xl:block">
             <span className="block text-sm font-medium">{user.name}</span>
             <span className="block text-xs text-muted">{role ? ROLE_META[role].label : 'No role'}</span>
@@ -112,6 +112,7 @@ function UserMenu() {
           <div className="border-b border-line px-4 py-3">
             <p className="text-sm font-semibold">{user.name}</p>
             <p className="text-xs text-muted">{user.email}</p>
+            <Link to="/profile" onClick={close} className="mt-2 inline-block text-sm font-medium text-accent hover:underline">My profile &amp; password</Link>
             <p className="mt-1.5 text-xs text-muted">Role in this journal: <span className="font-medium text-ink">{role ? ROLE_META[role].label : '—'}</span></p>
           </div>
           <div className="border-b border-line px-4 py-3">

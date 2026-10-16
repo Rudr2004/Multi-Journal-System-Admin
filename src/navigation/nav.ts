@@ -63,6 +63,7 @@ const M = {
   postCorrections: i('/post-publication', 'Post Corrections', 'postPub', FilePenLine, 'Corrections, erratum, retractions and withdrawals.'),
   scholar: i('/scholar-indexing', 'Google Scholar Indexing', 'scholar', Search, 'Indexed status per article and per issue.'),
   awards: i('/awards', 'Award Management', 'awards', Trophy, 'Award cycles, shortlists and approvals.'),
+  awardsAdmin: i('/awards', 'Award Approval', 'awards', Trophy, 'Approve or reject award winners nominated by Editors before they are issued or published.'),
   blog: i('/blog', 'Blog & Resources', 'blog', Newspaper, 'Blog posts and downloadable resources.', { badge: 'To confirm' }),
   reviewSubmissions: i('/my-reviews', 'Review Submissions', 'myReviews', ClipboardCheck, 'Papers assigned to you for review.', { badge: 'To confirm' }),
   reviewAssignmentsReviewer: i('/review-assignments', 'Review Assignments', 'reviewAssign', ClipboardList, 'Papers the Editor assigned to external Review Panel Members in your area.', { badge: 'Under discussion' }),
@@ -89,11 +90,11 @@ const group = (label: string, ...items: NavItem[]): NavGroup => ({ label, items 
 /** The client's sidebar for each role, in the client's order. Nothing outside this list appears in a role's menu. */
 export const ROLE_MENUS: Record<Role, NavGroup[]> = {
   super_admin: [
-    group('', M.dashboard, M.users, M.issues, M.conferencesAdmin, M.announcements, M.boardAdmin, M.metrics, M.pages, M.notifications, M.referrals, M.newsletter),
+    group('', M.dashboard, M.users, M.issues, M.conferencesAdmin, M.announcements, M.boardAdmin, M.metrics, M.awardsAdmin, M.pages, M.notifications, M.referrals, M.newsletter),
     group('Settings', M.journalSettings, M.payments, M.commLog, M.forms, M.analytics, M.audit),
   ],
   editor: [
-    group('', M.dashboard, M.manuscripts, M.issuesEditor, M.backdated, M.conferencesEditor, M.postCorrectionsManagement, M.scholar, M.awards),
+    group('', M.dashboard, M.manuscripts, M.backdated, M.conferencesEditor, M.postCorrectionsManagement, M.scholar, M.awards),
     group('Website', M.announcements, M.boardEditor, M.pages, M.blog, M.forms),
   ],
   associate_editor: [group('', M.dashboard, M.assigned, M.backdated, M.conferencesEditor, M.postCorrections)],
@@ -114,7 +115,7 @@ export interface Section {
 export const SECTIONS: Section[] = [
   { id: 'manuscripts-editor', label: 'Manuscript Submissions', roles: ['editor'], tabs: [{ ...M.manuscripts, label: 'Manuscripts' }, TABS.reviewMgmt, TABS.verify, TABS.finalApproval] },
   { id: 'finance-admin', label: 'Payments & Invoices', roles: ['super_admin'], tabs: [{ ...M.payments, label: 'Payments' }, TABS.invoices] },
-  { id: 'publishing-admin', label: 'Journal & Issue Management', roles: ['super_admin', 'editor'], tabs: [{ ...M.issues, label: 'Volumes & issues' }, TABS.doi, TABS.certificates] },
+  { id: 'publishing-admin', label: 'Journal & Issue Management', roles: ['super_admin'], tabs: [{ ...M.issues, label: 'Volumes & issues' }, TABS.doi, TABS.certificates] },
   { id: 'notifications-admin', label: 'Notification Management', roles: ['super_admin'], tabs: [{ ...M.notifications, label: 'Notification Management' }, TABS.dispatch] },
 ]
 

@@ -34,16 +34,21 @@ export function ScholarPage() {
   const canRecheck = perm.can('manage')
   const { data, loading, error, reload } = useAsync(() => listScholarStatus(journals), [journals])
   const [journalF, setJournalF] = useState('')
+  const [volumeF, setVolumeF] = useState('')
   const [issueF, setIssueF] = useState('')
   const [statusF, setStatusF] = useState('')
   const [busy, setBusy] = useState<Set<string>>(new Set())
 
   const rows = useMemo(
-    () => (data?.rows ?? []).filter((r) => (!journalF || r.journal === journalF) && (!issueF || r.issueId === issueF) && (!statusF || (statusF === 'indexed' ? r.indexed : !r.indexed))),
-    [data, journalF, issueF, statusF],
+    () => (data?.rows ?? []).filter((r) => (!journalF || r.journal === journalF) && (!volumeF || String(r.volume) === volumeF) && (!issueF || r.issueId === issueF) && (!statusF || (statusF === 'indexed' ? r.indexed : !r.indexed))),
+    [data, journalF, volumeF, issueF, statusF],
   )
   const issueOptions = useMemo(
-    () => (data?.issues ?? []).filter((i) => !journalF || i.journal === journalF).map((i) => ({ value: i.issueId, label: `${i.journal} · ${i.label}` })),
+    () => (data?.issues ?? []).filter((i) => (!journalF || i.journal === journalF) && (!volumeF || String(i.volume) === volumeF)).map((i) => ({ value: i.issueId, label: volumeF ? `Issue ${i.number}` : `${i.journal} · ${i.label}` })),
+    [data, journalF, volumeF],
+  )
+  const volumeOptions = useMemo(
+    () => [...new Set((data?.issues ?? []).filter((i) => !journalF || i.journal === journalF).map((i) => i.volume))].sort((a, b) => b - a).map((v) => ({ value: String(v), label: `Volume ${v}` })),
     [data, journalF],
   )
 
@@ -58,7 +63,7 @@ export function ScholarPage() {
       const res = await recheckScholar(ids)
       toast.success(
         res.nowIndexed
-          ? `Rechecked ${res.checked} article${res.checked > 1 ? 's' : ''}: ${res.nowIndexed} newly indexed${res.stillPending ? `, ${res.stillPending} still pending` : ''}.`
+          ? `Rechecked ${res.checked} article${res.checked > 1 ? 's' : ''}: ${res.nowIndexed} newly indexed${res.stillPending ? `, ${res.stillPending} still pending` : ''}. ${res.emailed} author${res.emailed === 1 ? '' : 's'} emailed the Google Scholar link.`
           : `Rechecked ${res.checked} article${res.checked > 1 ? 's' : ''}: none newly indexed. Google Scholar usually takes 2–4 weeks after publication.`,
       )
       clear?.()
@@ -119,6 +124,21 @@ export function ScholarPage() {
         <div className="card"><ErrorState message="Indexing status could not be loaded." onRetry={reload} /></div>
       ) : (
         <div className="space-y-5">
+          <SectionCard title="Recheck indexing">
+            <p className="mb-3 text-sm text-muted">Choose a volume and issue, then recheck Google Scholar for every article in it. When an article is found, its author is emailed the Google Scholar link automatically.</p>
+            <div className="flex flex-wrap items-end gap-3">
+              {journals.length > 1 && (
+                <div><label htmlFor="rc-journal" className="label">Journal</label><select id="rc-journal" className="input" value={journalF} onChange={(e) => { setJournalF(e.target.value); setVolumeF(''); setIssueF('') }}><option value="">All journals</option>{journals.map((j) => <option key={j} value={j}>{j}</option>)}</select></div>
+              )}
+              <div><label htmlFor="rc-volume" className="label">Volume</label><select id="rc-volume" className="input" value={volumeF} onChange={(e) => { setVolumeF(e.target.value); setIssueF('') }}><option value="">All volumes</option>{volumeOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select></div>
+              <div><label htmlFor="rc-issue" className="label">Issue</label><select id="rc-issue" className="input" value={issueF} onChange={(e) => setIssueF(e.target.value)}><option value="">Select an issue</option>{issueOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select></div>
+              <GuardedButton allowed={canRecheck && !!issueF} why={canRecheck ? 'Select a volume and issue first.' : perm.why('manage')} className="btn-primary" disabled={loading || busy.size > 0}
+                onClick={() => recheck(all.filter((r) => r.issueId === issueF).map((r) => r.paperId))}>
+                <RefreshCw size={15} strokeWidth={1.5} aria-hidden className={busy.size > 0 ? 'animate-spin' : ''} /> {busy.size > 0 ? 'Checking…' : `Recheck Indexing${issueF ? ` (${all.filter((r) => r.issueId === issueF).length})` : ''}`}
+              </GuardedButton>
+            </div>
+          </SectionCard>
+
           <section aria-label="Summary" className="grid grid-cols-2 gap-3 lg:grid-cols-4">
             <KpiCard label="Published articles" icon={FileText} loading={loading} value={formatNumber(all.length)} />
             <KpiCard label="Indexed" icon={CheckCircle2} loading={loading} value={formatNumber(indexed)} />
@@ -155,7 +175,7 @@ export function ScholarPage() {
                     {(data?.issues ?? []).map((i: ScholarIssueRow) => (
                       <tr key={i.issueId} className={cn('hover:bg-page', issueF === i.issueId && 'bg-accent-soft/40')}>
                         <th scope="row" className="px-4 py-2 text-left font-normal">
-                          <button className="flex items-center gap-2 text-left hover:underline" title="Filter the article list to this issue" onClick={() => { setIssueF(issueF === i.issueId ? '' : i.issueId); setJournalF(journals.length > 1 ? i.journal : '') }}>
+                          <button className="flex items-center gap-2 text-left hover:underline" title="Filter the article list to this issue" onClick={() => { setIssueF(issueF === i.issueId ? '' : i.issueId); setVolumeF(issueF === i.issueId ? '' : String(i.volume)); setJournalF(journals.length > 1 ? i.journal : '') }}>
                             <JournalBadge code={i.journal} /> <span className="whitespace-nowrap">{i.label}</span>
                           </button>
                         </th>
@@ -175,7 +195,8 @@ export function ScholarPage() {
             search={{ placeholder: 'Search articles', text: (r) => `${r.paperId} ${r.title} ${r.issueLabel}` }}
             filters={
               <>
-                {journals.length > 1 && <SelectFilter label="Journal" value={journalF} onChange={(v) => { setJournalF(v); setIssueF('') }} options={journals.map((j) => ({ value: j, label: j }))} />}
+                {journals.length > 1 && <SelectFilter label="Journal" value={journalF} onChange={(v) => { setJournalF(v); setVolumeF(''); setIssueF('') }} options={journals.map((j) => ({ value: j, label: j }))} />}
+                <SelectFilter label="Volume" value={volumeF} onChange={(v) => { setVolumeF(v); setIssueF('') }} options={volumeOptions} />
                 <SelectFilter label="Issue" value={issueF} onChange={setIssueF} options={issueOptions} />
                 <SelectFilter label="Status" value={statusF} onChange={setStatusF} options={[{ value: 'indexed', label: 'Indexed' }, { value: 'not', label: 'Not indexed' }]} />
               </>
@@ -187,7 +208,7 @@ export function ScholarPage() {
             )}
             empty={all.length === 0
               ? { icon: SearchX, title: 'No published articles yet', hint: 'Google Scholar only indexes published articles. Publish one from Final approval and it will appear here.' }
-              : { icon: SearchX, title: 'No articles match these filters', hint: 'Clear a filter or search to see every published article.', action: <button className="btn-secondary" onClick={() => { setJournalF(''); setIssueF(''); setStatusF('') }}>Clear filters</button> }}
+              : { icon: SearchX, title: 'No articles match these filters', hint: 'Clear a filter or search to see every published article.', action: <button className="btn-secondary" onClick={() => { setJournalF(''); setVolumeF(''); setIssueF(''); setStatusF('') }}>Clear filters</button> }}
           />
         </div>
       )}

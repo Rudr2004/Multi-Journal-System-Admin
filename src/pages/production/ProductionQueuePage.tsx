@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { AlertCircle, CheckCircle2, Factory, Newspaper, Undo2 } from 'lucide-react'
 import { PageHeader } from '@/layout/PageHeader'
 import { DataTable, SelectFilter, type Column } from '@/components/DataTable'
@@ -11,7 +11,8 @@ import { useIsAllJournals, useScopeJournals } from '@/lib/scope'
 import { useCurrentUser, usePermission } from '@/permissions/hooks'
 import { listProductionQueue, type QueueRow } from '@/mock/api/production'
 import { STATUS_META } from '@/shared/statuses'
-import { PaperTitle, usePapersKey } from './shared'
+import { usePapersKey } from './shared'
+import { TemplateCard } from './TemplateDownload'
 
 export function ProductionQueuePage() {
   const navigate = useNavigate()
@@ -22,27 +23,20 @@ export function ProductionQueuePage() {
   const onlyMine = perm.level === 'work'
   const key = usePapersKey()
   const q = useAsync(() => listProductionQueue(journals, onlyMine ? user?.id : undefined), [journals.join(','), onlyMine, user?.id, key])
-  const [status, setStatus] = useState('')
+  const [status, setStatus] = useState('pending')
   const [press, setPress] = useState('')
-  const rows = useMemo(() => (q.data ?? []).filter((r) => (!status || r.paper.status === status) && (!press || (press === 'in_press' ? r.inPress : !r.inPress))), [q.data, status, press])
+  const rows = useMemo(() => (q.data ?? []).filter((r) => (!status || (status === 'pending' ? r.paper.status !== 'ready_for_approval' : r.paper.status === 'ready_for_approval')) && (!press || (press === 'in_press' ? r.inPress : !r.inPress))), [q.data, status, press])
   const data = q.data ?? []
 
   const columns: Column<QueueRow>[] = [
-    { id: 'paper', header: 'Paper', locked: true, cell: (r) => <PaperTitle paper={r.paper} to={`/production/${r.paper.id}`} />, sort: (r) => r.paper.id },
+    { id: 'paper', header: 'Manuscript ID', locked: true, cell: (r) => <Link to={`/production/${r.paper.id}`} className="whitespace-nowrap font-medium text-accent hover:underline">{r.paper.id}</Link>, sort: (r) => r.paper.id },
+    { id: 'title', header: 'Title', cell: (r) => <p className="line-clamp-2 max-w-[420px] text-sm" title={r.paper.title}>{r.paper.title}</p>, sort: (r) => r.paper.title },
     ...(all ? [{ id: 'journal', header: 'Journal', cell: (r: QueueRow) => <JournalBadge code={r.paper.journal} />, sort: (r: QueueRow) => r.paper.journal } as Column<QueueRow>] : []),
     { id: 'status', header: 'Status', cell: (r) => <StatusBadge status={r.paper.status} />, sort: (r) => STATUS_META[r.paper.status].order },
     { id: 'press', header: 'Article In Press', cell: (r) => (r.inPress
       ? <Badge tone="info"><Newspaper size={12} aria-hidden /> In Press</Badge>
       : <span className="text-faint">Not yet listed</span>), sort: (r) => Number(r.inPress) },
-    { id: 'due', header: 'Due', cell: (r) => (r.paper.status === 'ready_for_approval' ? <span className="text-faint">—</span> : <DueChip value={r.due} />), sort: (r) => r.due },
-    { id: 'assignee', header: 'Assignee', cell: (r) => r.assigneeName ?? <span className="text-faint">Unassigned</span>, sort: (r) => r.assigneeName ?? '' },
-    {
-      id: 'checks', header: 'Checklist', cell: (r) => r.paper.status === 'ready_for_approval'
-        ? <Badge tone="success"><CheckCircle2 size={12} aria-hidden /> Complete</Badge>
-        : r.missing === 0 ? <Badge tone="success"><CheckCircle2 size={12} aria-hidden /> Ready to send</Badge>
-        : <Badge tone="warning"><AlertCircle size={12} aria-hidden /> {r.missing} open</Badge>,
-      sort: (r) => r.missing,
-    },
+    { id: 'due', header: 'Due date', cell: (r) => (r.paper.status === 'ready_for_approval' ? <span className="text-faint">—</span> : <DueChip value={r.due} showDate />), sort: (r) => r.due },
   ]
 
   return (
@@ -51,6 +45,7 @@ export function ProductionQueuePage() {
         title="Assigned manuscripts"
         description={onlyMine ? 'Papers assigned to you. Payment-verified papers arrive here automatically.' : perm.level === 'view' ? 'Read-only view of papers in production across your journals.' : 'Accepted and paid papers being prepared for publication.'}
       />
+      {journals.length === 1 && <TemplateCard journal={journals[0]} />}
       <section aria-label="Queue summary" className="mb-5 grid grid-cols-2 gap-4 md:grid-cols-5">
         <KpiCard label="In queue" value={data.length} icon={Factory} loading={q.loading} />
         <KpiCard label="In Press" value={data.filter((r) => r.inPress).length} icon={Newspaper} loading={q.loading} />
@@ -72,7 +67,7 @@ export function ProductionQueuePage() {
         onRetry={q.reload}
         onRowClick={(r) => navigate(`/production/${r.paper.id}`)}
         search={{ placeholder: 'Search by Paper ID or title', text: (r) => `${r.paper.id} ${r.paper.title} ${r.assigneeName ?? ''}` }}
-        filters={<><SelectFilter label="Article In Press" value={press} onChange={setPress} options={[{ value: 'in_press', label: 'In Press' }, { value: 'not', label: 'Not yet listed' }]} /><SelectFilter label="Status" value={status} onChange={setStatus} options={['paid', 'in_production', 'returned_to_production', 'ready_for_approval'].map((s) => ({ value: s, label: STATUS_META[s as keyof typeof STATUS_META].label }))} /></>}
+        filters={<><SelectFilter label="Article In Press" value={press} onChange={setPress} options={[{ value: 'in_press', label: 'In Press' }, { value: 'not', label: 'Not yet listed' }]} /><SelectFilter label="Status" value={status} onChange={setStatus} options={[{ value: 'pending', label: 'Pending' }, { value: 'completed', label: 'Completed' }]} /></>}
         rowClassName={(r) => (r.returned ? 'bg-red-50/40' : undefined)}
         empty={{ icon: Factory, title: onlyMine ? 'Your production queue is empty' : 'No papers in production', hint: 'Papers appear here automatically as soon as their payment is verified.' }}
       />

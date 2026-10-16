@@ -1,7 +1,7 @@
 import type { Author, AuditEntry, Channel, JournalCode, MessageLogEntry, Paper, PaperEvent, PaperStatus } from '@/shared/types'
 import { doiFor } from '@/shared/paperId'
 import { generatedAuthors } from './data/authors'
-import { useDataStore, useSession } from './store'
+import { savePaperOverride, useDataStore, useSession } from './store'
 
 let seq = 0
 export const newId = (prefix: string) => `${prefix}-${Date.now().toString(36)}${(seq++).toString(36)}`
@@ -34,7 +34,9 @@ export function updatePaper(id: string, patch: Partial<Paper>, opts?: { event?: 
   const { papers, patch: set } = useDataStore.getState()
   const before = papers.find((p) => p.id === id)
   if (!before) return
-  set({ papers: papers.map((p) => (p.id === id ? { ...p, ...patch, updatedAt: new Date().toISOString() } : p)) })
+  const updatedAt = new Date().toISOString()
+  set({ papers: papers.map((p) => (p.id === id ? { ...p, ...patch, updatedAt } : p)) })
+  savePaperOverride(id, { ...patch, updatedAt })
   if (opts?.event) logEvent(id, opts.event, opts.note)
   if (opts?.audit) recordAudit({ journal: before.journal, action: opts.audit, target: id, oldValue: patch.status ? before.status : undefined, newValue: patch.status })
 }
@@ -48,10 +50,29 @@ export function sendMessage(m: { journal: JournalCode; paperId?: string; recipie
   patch({ messages: [{ id: newId('msg'), at: new Date().toISOString(), status: 'queued', ...m }, ...messages] })
 }
 
-/** The Associate Editor who receives production work for a journal. */
+/** Production stages that count towards an Associate Editor's workload. */
+const OPEN_PRODUCTION: PaperStatus[] = ['paid', 'in_production', 'returned_to_production', 'ready_for_approval']
+
+/** Active Associate Editors who hold that role in this journal. */
+export function journalAssociateEditors(journal: JournalCode) {
+  return useDataStore.getState().users.filter((u) => u.status === 'active' && u.assignments[journal] === 'associate_editor')
+}
+
+/** How many manuscripts an Associate Editor is working on right now. */
+export function associateWorkload(userId: string): number {
+  return useDataStore.getState().papers.filter((p) => p.assigneeId === userId && OPEN_PRODUCTION.includes(p.status)).length
+}
+
+/** The Associate Editor with the lightest workload for a journal (first listed wins a tie). */
 export function productionAssigneeFor(journal: JournalCode): string | undefined {
-  const { users } = useDataStore.getState()
-  return users.find((u) => u.status === 'active' && u.assignments[journal] === 'associate_editor')?.id
+  const list = journalAssociateEditors(journal)
+  if (list.length === 0) return undefined
+  return [...list].sort((a, b) => associateWorkload(a.id) - associateWorkload(b.id))[0].id
+}
+
+/** Same, but only when the Editor has switched "Auto-assign Associate Editor" on for the journal. */
+export function autoAssigneeFor(journal: JournalCode): string | undefined {
+  return useDataStore.getState().autoAssignAe[journal] === false ? undefined : productionAssigneeFor(journal)
 }
 
 /** Authors of a paper: edited list if a correction was made, otherwise the generated one. */

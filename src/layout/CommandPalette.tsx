@@ -9,6 +9,7 @@ import { useDataStore, useSession } from '@/mock/store'
 import { doiFor } from '@/shared/paperId'
 import { STATUS_META } from '@/shared/statuses'
 import { JournalBadge } from '@/components/Badges'
+import { paperStagePath } from '@/lib/paperRoutes'
 import { useUi } from './uiStore'
 
 const itemCls = 'flex cursor-pointer items-center gap-3 rounded-md px-3 py-2 text-sm aria-selected:bg-accent-soft aria-selected:text-accent'
@@ -65,7 +66,7 @@ export function CommandPalette() {
         {canSeePapers && (
           <Command.Group heading="Papers" className={groupCls}>
             {papers.filter((p) => visible(p.journal)).map((p) => (
-              <Command.Item key={p.id} value={`${p.id} ${doiFor(p.id)} ${p.authorEmail} ${p.author} ${p.title}`} onSelect={() => go(`/submissions/${p.id}`)} className={itemCls}>
+              <Command.Item key={p.id} value={`${p.id} ${doiFor(p.id)} ${p.authorEmail} ${p.author} ${p.title}`} onSelect={() => go(paperStagePath(role, p))} className={itemCls}>
                 <FileText size={16} strokeWidth={1.5} aria-hidden className="shrink-0" />
                 <span className="min-w-0 flex-1">
                   <span className="block whitespace-nowrap font-medium">{p.id}</span>

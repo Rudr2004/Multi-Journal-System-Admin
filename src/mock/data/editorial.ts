@@ -59,6 +59,8 @@ export interface DecisionRecord {
   by: string
   at: string
   round: number
+  /** Review reports the Editor selected before deciding. */
+  basedOn?: { id: string; reviewerName: string; recommendation: Recommendation }[]
 }
 
 export interface FileVersion {

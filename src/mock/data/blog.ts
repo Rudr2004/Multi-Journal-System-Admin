@@ -34,6 +34,10 @@ export interface BlogDraft {
   /** comma separated */
   keywords: string
   cover: CoverTone
+  /** Uploaded cover image (data URL); the colour cover is the fallback. */
+  coverImage?: string
+  /** Body format: Markdown (default) or pasted HTML from an external page builder. */
+  format?: 'markdown' | 'html'
 }
 
 export interface BlogPost extends BlogDraft {

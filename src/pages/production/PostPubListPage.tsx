@@ -29,19 +29,23 @@ export function PostPubListPage() {
   const isAe = perm.role === 'associate_editor'
   const rev = useProductionStore((s) => s.changeRequests)
   const users = useDataStore((s) => s.users)
+  const papers = useDataStore((s) => s.papers)
+  const titleOf = (id: string) => papers.find((p) => p.id === id)?.title ?? ''
   const q = useAsync(
     () => listChangeRequests(journals, isSupport ? { requestedBy: user?.name } : isAe ? { forAssociateEditor: true } : {}),
     [journals.join(','), isSupport, isAe, user?.name, rev.map((r) => r.id + r.status + (r.fee?.state ?? '')).join()],
   )
+  const [state, setState] = useState('pending')
   const [status, setStatus] = useState('')
   const [type, setType] = useState('')
-  const rows = useMemo(() => (q.data ?? []).filter((r) => (!status || r.status === status) && (!type || r.type === type)), [q.data, status, type])
+  const rows = useMemo(() => (q.data ?? []).filter((r) => (!state || (state === 'pending' ? !['completed', 'rejected'].includes(r.status) : ['completed', 'rejected'].includes(r.status))) && (!status || r.status === status) && (!type || r.type === type)), [q.data, state, status, type])
   const waitingForMe = (q.data ?? []).filter((r) => isAe && !workBlockReason(r) && r.assigneeId === user?.id).length
   const toDecide = (q.data ?? []).filter((r) => perm.can('approve') && ['requested', 'under_review', 'version_review'].includes(r.status)).length
 
   const columns: Column<ChangeRequest>[] = [
     { id: 'id', header: 'Request', locked: true, cell: (r) => <Link to={`/post-publication/${r.id}`} className="whitespace-nowrap font-medium text-accent hover:underline">{r.id}</Link>, sort: (r) => r.id },
-    { id: 'paper', header: 'Paper', cell: (r) => <span className="whitespace-nowrap">{r.paperId}</span>, sort: (r) => r.paperId },
+    { id: 'paper', header: 'Manuscript ID', cell: (r) => <span className="whitespace-nowrap font-medium">{r.paperId}</span>, sort: (r) => r.paperId },
+    { id: 'title', header: 'Title', cell: (r) => <p className="line-clamp-2 max-w-[360px] text-sm" title={titleOf(r.paperId)}>{titleOf(r.paperId)}</p>, sort: (r) => titleOf(r.paperId) },
     ...(all ? [{ id: 'journal', header: 'Journal', cell: (r: ChangeRequest) => <JournalBadge code={r.journal} />, sort: (r: ChangeRequest) => r.journal } as Column<ChangeRequest>] : []),
     { id: 'type', header: 'Type', cell: (r) => <ChangeTypeBadge type={r.type} />, sort: (r) => r.type },
     { id: 'status', header: 'Status', cell: (r) => <ChangeStatusBadge status={r.status} />, sort: (r) => r.status },
@@ -80,9 +84,10 @@ export function PostPubListPage() {
       <DataTable<ChangeRequest>
         id="post-pub" data={rows} columns={columns} rowKey={(r) => r.id} loading={q.loading} error={!!q.error} onRetry={q.reload}
         onRowClick={(r) => navigate(`/post-publication/${r.id}`)}
-        search={{ placeholder: 'Search by request, Paper ID or reason', text: (r) => `${r.id} ${r.paperId} ${r.reason} ${r.requestedBy}` }}
+        search={{ placeholder: 'Search by request, Paper ID or reason', text: (r) => `${r.id} ${r.paperId} ${titleOf(r.paperId)} ${r.reason} ${r.requestedBy}` }}
         filters={<>
-          <SelectFilter label="Status" value={status} onChange={setStatus} options={Object.entries(CHANGE_STATUS_META).map(([value, m]) => ({ value, label: m.label }))} />
+          <SelectFilter label="Status" value={state} onChange={setState} options={[{ value: 'pending', label: 'Pending' }, { value: 'completed', label: 'Completed' }]} />
+          <SelectFilter label="Stage" value={status} onChange={setStatus} options={Object.entries(CHANGE_STATUS_META).map(([value, m]) => ({ value, label: m.label }))} />
           <SelectFilter label="Type" value={type} onChange={setType} options={(Object.keys(CHANGE_TYPE_META) as ChangeType[]).map((value) => ({ value, label: CHANGE_TYPE_META[value].label }))} />
         </>}
         empty={{

@@ -140,7 +140,7 @@ function CycleView({ cycle, reload }: { cycle: AwardCycle; reload: () => void })
         return {
           text: `Submitted ${cycle.submittedAt ? formatDate(cycle.submittedAt) : ''}. A Super Admin must approve the results before certificates can be issued.`,
           actions: <>
-            <GuardedButton allowed={canApprove} why={approveWhy} className="btn-secondary" onClick={() => setReturning(true)}>Return to shortlisting</GuardedButton>
+            <GuardedButton allowed={canApprove} why={approveWhy} className="btn-secondary" onClick={() => setReturning(true)}>Reject</GuardedButton>
             <GuardedButton allowed={canApprove} why={approveWhy} className="btn-primary" onClick={() => setConfirm('approve')}><BadgeCheck size={15} strokeWidth={1.5} aria-hidden /> Approve results</GuardedButton>
           </>,
         }
@@ -252,9 +252,9 @@ function CycleView({ cycle, reload }: { cycle: AwardCycle; reload: () => void })
       <ConfirmDialog open={confirm === 'delete'} danger onClose={() => setConfirm(null)} confirmLabel="Delete draft" title="Delete this draft cycle?"
         consequences={['Permanently remove the cycle and its settings', 'This cannot be undone']}
         onConfirm={async () => { try { await deleteCycle(cycle.id); toast.success('Draft cycle deleted.'); navigate('/awards') } catch (e) { toast.error((e as Error).message) } }} />
-      <ReasonDialog open={returning} onClose={() => setReturning(false)} title="Return to shortlisting" confirmLabel="Return" label="What needs to change?"
-        consequences={['The shortlist is unlocked so the winners can be reconsidered', 'The reason is shown to the team and recorded in the audit log']}
-        onSubmit={(reason) => run(() => returnToShortlisting(cycle.id, reason), 'Returned to shortlisting.')} />
+      <ReasonDialog open={returning} onClose={() => setReturning(false)} title="Reject these award results" confirmLabel="Reject" label="Why are you rejecting them?"
+        consequences={['The results are not issued or published', 'The cycle goes back to the Editor to reconsider the winners', 'Your reason is shown to the Editor and recorded in the audit log']}
+        onSubmit={(reason) => run(() => returnToShortlisting(cycle.id, reason), 'Rejected. The Editor has been asked to reconsider the winners.')} />
       <ConfirmDialog open={!!dup} onClose={() => setDup(null)} confirmLabel="Shortlist anyway" title={`${dup?.name ?? ''} has already won`}
         consequences={dup?.flags.filter((f) => f.kind === 'awarded').map((f) => `${f.samePaper ? 'This paper' : 'This author'} was awarded in ${f.cycleName}`) ?? []}
         onConfirm={() => dup && add(dup)} />

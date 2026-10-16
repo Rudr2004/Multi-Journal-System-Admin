@@ -1,4 +1,4 @@
-import type { Author, JournalCode, Paper } from '@/shared/types'
+import type { Author, FileRef, JournalCode, Paper } from '@/shared/types'
 import { journalByCode } from './core'
 
 /* ------------------------------------------------------------------ */
@@ -70,9 +70,13 @@ export interface ProductionRecord {
   certificates: CertificateRecord[]
   returnNote?: ReturnNote
   returnAcknowledged: boolean
+  /** Print version carries a "Cite this article" block. */
+  citeInPrint?: boolean
   sentAt?: string
   savedAt?: string
   publication?: PublicationResult
+  /** Set when the Editor retracts the article at the author's request. */
+  retraction?: RetractionRecord
   /** Version of the live article (bumped by post-publication changes). */
   articleVersion: number
 }
@@ -99,7 +103,41 @@ export interface BackdatedItem {
   unassigned?: boolean
 }
 
-export type ChangeType = 'correction' | 'author_name' | 'affiliation' | 'file_replacement' | 'erratum' | 'retraction' | 'withdrawal'
+/** An author as entered on the backdated submission form (extra fields kept beside the shared Author record). */
+export interface BackdatedAuthorForm {
+  name: string
+  email: string
+  phoneCode: string
+  phone: string
+  country: string
+  affiliation: string
+  orcid: string
+  photo: FileRef | null
+  corresponding: boolean
+}
+
+/** Form data the Editor saved for a backdated article (the parts the shared Paper record has no room for). */
+export interface BackdatedSubmission {
+  paperId: string
+  issueId: string
+  subject: string
+  branch: string
+  abstract: string
+  keywords: string[]
+  mentor?: { name: string; email: string; phone: string; institution: string }
+  referralCode: string
+  conference: string
+  manuscript: FileRef | null
+  previousManuscripts: FileRef[]
+  supplementary: FileRef[]
+  copyright: FileRef | null
+  declarations: { original: boolean; ethics: boolean; copyright: boolean; consent: boolean }
+  authors: BackdatedAuthorForm[]
+  savedAt: string
+  savedBy: string
+}
+
+export type ChangeType ='correction' | 'author_name' | 'affiliation' | 'file_replacement' | 'erratum' | 'retraction' | 'withdrawal'
 
 export const CHANGE_TYPE_META: Record<ChangeType, { label: string; hint: string; editsArticle: boolean }> = {
   correction: { label: 'Correction', hint: 'Fix an error in the article text, a table or a figure caption.', editsArticle: true },
@@ -147,12 +185,35 @@ export interface ChangeTarget {
   apply: ChangeApply
 }
 
+/** Full metadata edit made by the Associate Editor for a correction. */
+export interface MetadataEdit {
+  title: string
+  abstract: string
+  keywords: string[]
+  authors: Author[]
+  finalFileName?: string
+  manuscriptName?: string
+}
+
+export interface RetractionRecord {
+  at: string
+  by: string
+  approvedBy: string
+  reason: string
+  wasPublished: boolean
+  consent: { from: string; date: string; excerpt: string; fileName?: string }
+  notice: string
+  url: string
+  doi: string
+}
+
 export interface ArticleVersion {
   n: number
   at: string
   by: string
   summary: string
   changes: { field: string; oldValue: string; newValue: string }[]
+  metadata?: MetadataEdit
   state: 'live' | 'draft' | 'in_review' | 'approved' | 'superseded'
 }
 

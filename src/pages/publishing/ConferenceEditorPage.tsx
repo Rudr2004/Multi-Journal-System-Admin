@@ -13,7 +13,8 @@ import { DescriptionList } from '@/components/Form'
 import { toast } from '@/components/Toasts'
 import { useAsync } from '@/lib/useAsync'
 import { useUnsavedChanges } from '@/lib/useUnsavedChanges'
-import { usePermission } from '@/permissions/hooks'
+import { useCan, usePermission, useRole } from '@/permissions/hooks'
+import { paperStagePath } from '@/lib/paperRoutes'
 import {
   createProceedingsIssue, getConference, linkSubmissions, publishProceedings, saveConference, unlinkSubmission, type ConferenceDetail,
 } from '@/mock/api/conferences'
@@ -23,7 +24,8 @@ import { formatDate } from '@/shared/formatters'
 import type { Paper } from '@/shared/types'
 import { ConferenceProductionDetail } from './ConferenceProduction'
 import { ConferenceFields, conferenceSchema, toFormValues, toInput } from './conferenceForm'
-import { ImageField, IssueStatusBadge, type ImageValue } from './parts'
+import { IssueStatusBadge } from './parts'
+import { HighlightsNoteCard, KeyMembersCard, MediaCard } from './ConferenceSections'
 
 export function ConferenceEditorPage() {
   const { conferenceId = '' } = useParams()
@@ -42,14 +44,13 @@ function ConferenceEditorLoader({ conferenceId }: { conferenceId: string }) {
 function ConferenceEditor({ detail, reload }: { detail: ConferenceDetail; reload: () => void }) {
   const { conference: c, issue, linked, candidates } = detail
   const perm = usePermission('conferences')
+  const role = useRole()
+  const canIssues = useCan('issues', 'view')
   const canEdit = perm.can('manage') && issue?.status !== 'published'
   const st = conferenceStatus(c, issue)
 
-  const { register, handleSubmit, watch, setValue, reset, formState: { errors, isDirty, isSubmitting } } = useForm({ resolver: zodResolver(conferenceSchema), defaultValues: toFormValues(c) })
-  const [logo, setLogo] = useState<ImageValue | null>(c.logoName ? { name: c.logoName, data: c.logoData } : null)
-  const [orgLogo, setOrgLogo] = useState<ImageValue | null>(c.organiserLogoName ? { name: c.organiserLogoName, data: c.organiserLogoData } : null)
-  const [baseLogos, setBaseLogos] = useState(JSON.stringify([logo, orgLogo]))
-  const dirty = isDirty || JSON.stringify([logo, orgLogo]) !== baseLogos
+  const { register, handleSubmit, watch, control, setValue, reset, formState: { errors, isDirty, isSubmitting } } = useForm({ resolver: zodResolver(conferenceSchema), defaultValues: toFormValues(c) })
+  const dirty = isDirty
   useUnsavedChanges(canEdit && dirty)
 
   const [linking, setLinking] = useState(false)
@@ -59,9 +60,8 @@ function ConferenceEditor({ detail, reload }: { detail: ConferenceDetail; reload
 
   const save = handleSubmit(async (v) => {
     try {
-      await saveConference(c.id, toInput(v, { logoName: logo?.name, logoData: logo?.data, organiserLogoName: orgLogo?.name, organiserLogoData: orgLogo?.data }))
+      await saveConference(c.id, toInput(v))
       reset(v)
-      setBaseLogos(JSON.stringify([logo, orgLogo]))
       toast.success('Conference saved')
       reload()
     } catch (e) { toast.error((e as Error).message) }
@@ -91,14 +91,13 @@ function ConferenceEditor({ detail, reload }: { detail: ConferenceDetail; reload
               <fieldset disabled={!canEdit}>
                 <legend className="sr-only">Conference details</legend>
                 <ConferenceFields register={register} errors={errors} watch={watch} journals={[c.journal]} lockJournal setApc={(on) => setValue('apcEnabled', on, { shouldDirty: true })} />
-                <div className="mt-5 grid gap-5 sm:grid-cols-2">
-                  <ImageField label="Conference logo" value={logo} onChange={setLogo} disabled={!canEdit} aspect="aspect-square" width="w-24" />
-                  <ImageField label="Organiser logo" value={orgLogo} onChange={setOrgLogo} disabled={!canEdit} aspect="aspect-square" width="w-24" />
-                </div>
               </fieldset>
               <button type="submit" className="sr-only" tabIndex={-1}>Save</button>
             </form>
           </SectionCard>
+          <KeyMembersCard control={control} register={register} errors={errors} disabled={!canEdit} />
+          <HighlightsNoteCard control={control} register={register} errors={errors} watch={watch} disabled={!canEdit} />
+          <MediaCard conference={c} canEdit={perm.can('manage')} onSaved={reload} />
         </div>
 
         <div className="space-y-5 lg:col-span-2">
@@ -111,13 +110,13 @@ function ConferenceEditor({ detail, reload }: { detail: ConferenceDetail; reload
             ) : (
               <div className="space-y-4">
                 <DescriptionList cols={1} items={[
-                  { label: 'Issue', value: <Link to={`/issues/${issue.id}`} className="font-medium text-accent hover:underline">{issue.label}</Link> },
+                  { label: 'Issue', value: canIssues ? <Link to={`/issues/${issue.id}`} className="font-medium text-accent hover:underline">{issue.label}</Link> : <span className="font-medium">{issue.label}</span> },
                   { label: 'Status', value: <IssueStatusBadge status={issue.status} /> },
                   { label: 'Articles', value: issue.articleIds.length },
-                  { label: issue.status === 'published' ? 'Published online' : 'Planned publication', value: formatDate(issue.actualOnlineDate ?? issue.publicationDate) },
+                  { label: issue.status === 'published' ? 'Published online' : 'Planned publication', value: formatDate(issue.publicationDate) },
                 ]} />
                 <div className="flex flex-wrap gap-2">
-                  <Link to={`/issues/${issue.id}`} className="btn-secondary"><FileText size={15} strokeWidth={1.5} aria-hidden /> Open issue editor</Link>
+                  {canIssues && <Link to={`/issues/${issue.id}`} className="btn-secondary"><FileText size={15} strokeWidth={1.5} aria-hidden /> Open issue editor</Link>}
                   {issue.status !== 'published' && (
                     <GuardedButton className="btn-primary" allowed={perm.can('manage') && !noArticles}
                       why={perm.why('manage') ?? 'Add at least one article in the issue editor before publishing.'} disabled={busy} onClick={() => setConfirmPublish(true)}>
@@ -130,9 +129,12 @@ function ConferenceEditor({ detail, reload }: { detail: ConferenceDetail; reload
           </SectionCard>
 
           <SectionCard title={`Linked submissions (${linked.length})`}
-            action={<GuardedButton className="btn-secondary" allowed={perm.can('manage')} why={perm.why('manage')} onClick={() => setLinking(true)}><Link2 size={15} strokeWidth={1.5} aria-hidden /> Link papers</GuardedButton>} flush>
+            action={<div className="flex flex-wrap gap-2">
+              <GuardedButton className="btn-secondary" allowed={perm.can('manage')} why={perm.why('manage')} onClick={() => setLinking(true)}><Link2 size={15} strokeWidth={1.5} aria-hidden /> Link papers</GuardedButton>
+            </div>} flush>
             {linked.length === 0 ? (
-              <EmptyState title="No submissions linked" hint="Link accepted or published papers that were presented at this conference." />
+              <EmptyState title="No submissions yet" hint={`Papers authors submit for ${c.shortName} show here and in Manuscript Submissions. You can also link existing papers now, then screen, review and publish them through the normal manuscript workflow.`}
+                action={<GuardedButton className="btn-primary" allowed={perm.can('manage')} why={perm.why('manage')} onClick={() => setLinking(true)}><Link2 size={15} strokeWidth={1.5} aria-hidden /> Link papers</GuardedButton>} />
             ) : (
               <ul className="divide-y divide-line">
                 {linked.map((p) => (
@@ -143,7 +145,7 @@ function ConferenceEditor({ detail, reload }: { detail: ConferenceDetail; reload
                         <StatusBadge status={p.status} />
                       </div>
                       <p className="line-clamp-2 text-sm text-muted" title={p.title}>{p.title}</p>
-                      <p className="text-xs text-muted">{p.author}</p>
+                      <p className="text-xs text-muted">{p.author} · <Link to={paperStagePath(role, p)} className="text-accent hover:underline">Open in workflow</Link></p>
                     </div>
                     <GuardedButton className="btn-ghost !h-8 !px-2" allowed={perm.can('manage') && issue?.status !== 'published'} why={perm.why('manage') ?? 'Proceedings are published.'} aria-label={`Unlink ${p.id}`}
                       onClick={() => run(() => unlinkSubmission(c.id, p.id), `${p.id} unlinked`)}><Unlink size={15} strokeWidth={1.5} aria-hidden /></GuardedButton>

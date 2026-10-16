@@ -16,8 +16,8 @@ export interface AuditFilters {
   journal?: JournalCode | 'ALL' | ''
   actor?: string
   category?: string
-  from?: string // yyyy-MM-dd
-  to?: string
+  from?: string // yyyy-MM-ddTHH:mm (local time); a plain yyyy-MM-dd means the start of that day
+  to?: string // yyyy-MM-ddTHH:mm; a plain yyyy-MM-dd means the end of that day
   /** restrict to the journals in scope (plus platform-wide entries) */
   scope?: JournalCode[]
 }
@@ -25,6 +25,12 @@ export interface AuditFilters {
 export interface AuditResult {
   entries: AuditEntry[]
   actors: string[]
+}
+
+/** Local-time boundary: 'yyyy-MM-ddTHH:mm' is used as is (to = end of that minute); a bare date covers the whole day. */
+const bound = (v: string, end: boolean) => {
+  if (v.length <= 10) return new Date(`${v}T${end ? '23:59:59.999' : '00:00:00'}`).getTime()
+  return new Date(v).getTime() + (end ? 59_999 : 0)
 }
 
 export async function listAudit(f: AuditFilters = {}): Promise<AuditResult> {
@@ -35,11 +41,9 @@ export async function listAudit(f: AuditFilters = {}): Promise<AuditResult> {
     if (f.journal && e.journal !== f.journal) return false
     if (f.actor && e.actor !== f.actor) return false
     if (f.category && auditCategory(e.action) !== f.category) return false
-    // compare in local time so the date pickers behave as users expect
-    const local = new Date(e.at)
-    const localDay = `${local.getFullYear()}-${String(local.getMonth() + 1).padStart(2, '0')}-${String(local.getDate()).padStart(2, '0')}`
-    if (f.from && localDay < f.from) return false
-    if (f.to && localDay > f.to) return false
+    const t = new Date(e.at).getTime()
+    if (f.from && t < bound(f.from, false)) return false
+    if (f.to && t > bound(f.to, true)) return false
     return true
   })
   return { entries, actors: [...new Set(all.map((e) => e.actor))].sort() }

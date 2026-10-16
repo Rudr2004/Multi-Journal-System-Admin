@@ -11,6 +11,7 @@ export interface AnnouncementInput {
   channel: AnnouncementChannel
   link: string
   highlight: boolean
+  image?: { name: string; data?: string }
   title: string
   body: string
   type: AnnouncementType
