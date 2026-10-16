@@ -3,9 +3,9 @@ import type { Channel } from '@/shared/types'
 import { registerReset } from '../reset'
 import { useDataStore } from '../store'
 import {
-  buildBotTree, buildChannelPause, buildChatMeta, buildDispatched, buildFaqs, buildNotices, buildReminders, buildTemplates,
+  buildBotTree, buildChannelPause, buildHtmlLayouts, buildChatMeta, buildDispatched, buildFaqs, buildNotices, buildReminders, buildTemplates,
   buildThreads, buildTicketDetails, buildTimeSlots,
-  type BotNode, type ChatMessage, type ChatMeta, type DispatchedBatch, type DispatchNotice, type Faq, type MessageTemplate,
+  type BotNode, type HtmlLayout, type ChatMessage, type ChatMeta, type DispatchedBatch, type DispatchNotice, type Faq, type MessageTemplate,
   type ReminderSequence, type TicketDetail, type TimeSlot,
 } from '../data/communication'
 import { buildInboxConvos, buildStaffAlerts, type InboxConvo, type StaffAlertPrefs } from '../data/inbox'
@@ -20,6 +20,8 @@ interface CommState {
   resolvedFailures: Record<string, { at: string; by: string; newId: string }>
   /* templates & schedule */
   templates: MessageTemplate[]
+  /** Reusable HTML email layouts. */
+  htmlLayouts: HtmlLayout[]
   timeSlots: TimeSlot[]
   reminders: ReminderSequence[]
   channelPaused: Record<Channel, boolean>
@@ -51,6 +53,7 @@ function seed() {
     dispatched: buildDispatched(),
     resolvedFailures: {},
     templates: buildTemplates(),
+    htmlLayouts: buildHtmlLayouts(),
     timeSlots: buildTimeSlots(),
     reminders: buildReminders(),
     channelPaused: buildChannelPause(),

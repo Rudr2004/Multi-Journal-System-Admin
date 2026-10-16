@@ -1,4 +1,5 @@
-import { RefreshCw } from 'lucide-react'
+import { Copy, RefreshCw } from 'lucide-react'
+import { toast } from '@/components/Toasts'
 import { CharCount, FormField } from '@/components/Form'
 import { doiFor } from '@/shared/paperId'
 import { draftSeo, isValidSlug, slugify } from '@/mock/data/production'
@@ -7,7 +8,10 @@ import type { JournalCode } from '@/shared/types'
 import type { Draft } from './MetadataChecklist'
 
 /** SEO title/description are drafted from the article; any manual edit sticks until regenerated. */
-export function SeoPanel({ draft, update, readOnly, journal, paperId }: { draft: Draft; update: (p: Partial<Draft>) => void; readOnly: boolean; journal: JournalCode; paperId: string }) {
+export function SeoPanel({ draft, update, readOnly, journal, paperId, originalAbstract }: { draft: Draft; update: (p: Partial<Draft>) => void; readOnly: boolean; journal: JournalCode; paperId: string; originalAbstract?: string }) {
+  const copyAbstract = async () => {
+    try { await navigator.clipboard.writeText(originalAbstract || draft.abstract); toast.success('Abstract copied. Use it to rewrite the SEO title and description.') } catch { toast.info('Copy is not available here. Select the abstract in the manuscript tab and copy it manually.') }
+  }
   const { seo } = draft
   const setSeo = (p: Partial<Draft['seo']>) => update({ seo: { ...seo, ...p } })
   const regenerate = () => {
@@ -20,7 +24,10 @@ export function SeoPanel({ draft, update, readOnly, journal, paperId }: { draft:
       <div className="space-y-4">
         <div className="flex items-center justify-between gap-3">
           <p className="text-sm text-muted">Drafted automatically from the title, abstract and keywords. Edit any field to override it.</p>
-          <button type="button" className="btn-secondary shrink-0" disabled={readOnly} onClick={regenerate}><RefreshCw size={14} aria-hidden /> Regenerate</button>
+          <div className="flex shrink-0 flex-wrap gap-2">
+            <button type="button" className="btn-secondary" onClick={copyAbstract}><Copy size={14} aria-hidden /> Copy abstract</button>
+            <button type="button" className="btn-secondary" disabled={readOnly} onClick={regenerate}><RefreshCw size={14} aria-hidden /> Regenerate</button>
+          </div>
         </div>
         <FormField label="SEO title" required error={seo.title.length > 60 ? 'Keep the SEO title to 60 characters or fewer.' : !seo.title.trim() ? 'The SEO title is required.' : undefined}>
           {(a) => (

@@ -3,6 +3,7 @@ import { doiFor } from '@/shared/paperId'
 import { formatDate } from '@/shared/formatters'
 import { journalByCode } from './core'
 import { NOW, nextDispatch } from './papers'
+import { STARTER_HTML } from './emailHtml'
 
 const ago = (hours: number) => new Date(NOW.getTime() - hours * 3_600_000).toISOString()
 
@@ -23,6 +24,7 @@ export const TEMPLATE_VARIABLES: TemplateVariable[] = [
   { key: 'review_due_date', label: 'Review due date', sample: '24 Oct 2026' },
   { key: 'decision_note', label: 'Decision note', sample: 'The reviewers found the methodology sound and the results well supported.' },
   { key: 'amount', label: 'Amount payable', sample: '₹2,950.00' },
+  { key: 'payment_amount', label: 'Payment amount', sample: '₹2,950.00' },
   { key: 'invoice_no', label: 'Invoice number', sample: 'INV-2026-0418' },
   { key: 'payment_link', label: 'Payment link', sample: 'https://pay.edtechpublishers.in/p/8f2a1c' },
   { key: 'certificate_link', label: 'Certificate link', sample: 'https://ijmat.example.org/certificate/IJMAT2026000113' },
@@ -51,6 +53,7 @@ export function paperVars(p: Paper): Record<string, string> {
     certificate_link: `https://${slug}/certificate/${p.id}`,
     review_due_date: p.reviewDue ? formatDate(p.reviewDue) : base.review_due_date,
     amount: p.authorCountry === 'India' ? '₹2,950.00' : '$49.00',
+    payment_amount: p.authorCountry === 'India' ? '₹2,950.00' : '$49.00',
   }
 }
 
@@ -63,6 +66,16 @@ export const usedVariables = (text: string): string[] => {
   return out
 }
 export const unknownVariables = (text: string) => usedVariables(text).filter((k) => !VARIABLE_KEYS.has(k))
+
+/** HTML emails accept both {{paper_id}} and the shorter {paper_id}. */
+const ANY_VAR_RE = /\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}|\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}/g
+export const renderAny = (text: string, vars: Record<string, string>) => text.replace(ANY_VAR_RE, (m, a?: string, b?: string) => vars[(a ?? b) as string] ?? m)
+export const usedVariablesAny = (text: string): string[] => {
+  const out: string[] = []
+  for (const m of text.matchAll(ANY_VAR_RE)) { const k = (m[1] ?? m[2]) as string; if (!out.includes(k)) out.push(k) }
+  return out
+}
+export const unknownVariablesAny = (text: string) => usedVariablesAny(text).filter((k) => !VARIABLE_KEYS.has(k))
 
 /* ------------------------------------------------------------------ */
 /* Templates                                                            */
@@ -92,6 +105,9 @@ export interface MessageTemplate {
   channel: Channel
   subject?: string
   body: string
+  /** Email only: 'html' sends the custom HTML below (with `body` as the plain-text version). */
+  format?: 'text' | 'html'
+  html?: string
   /** SMS: DLT registration */
   dltId?: string
   senderId?: string
@@ -143,6 +159,16 @@ const WA: Record<string, string> = {
   invoice_sent: 'Hello {{author_name}}, invoice *{{invoice_no}}* for {{paper_id}} has been sent to your email. Reply here for a copy.',
   certificate_ready: 'Hello {{author_name}}, your certificate for *{{paper_id}}* is ready to download: {{certificate_link}}',
   published_notice: 'Congratulations {{author_name}}! *{{paper_id}}* is now live. Read it here: {{article_url}} (DOI {{doi}})',
+}
+
+/** A reusable HTML email layout that can be applied to any notification. */
+export interface HtmlLayout { id: string; name: string; html: string; updatedAt: string; updatedBy: string }
+
+export function buildHtmlLayouts(): HtmlLayout[] {
+  return [
+    { id: 'layout-standard', name: 'Standard notification (responsive)', html: STARTER_HTML, updatedAt: ago(24 * 12), updatedBy: 'Priya Menon' },
+    { id: 'layout-payment', name: 'Payment and invoice', html: STARTER_HTML.replace('This is an update about your paper', 'We have an update on the payment for your paper').replace('View details', 'Pay securely'), updatedAt: ago(24 * 5), updatedBy: 'Priya Menon' },
+  ]
 }
 
 export function buildTemplates(): MessageTemplate[] {

@@ -1,4 +1,4 @@
-import type { Issue, JournalCode, Paper, PaperStatus } from '@/shared/types'
+import type { FileRef, Issue, JournalCode, Paper, PaperStatus } from '@/shared/types'
 import type { Tone } from '@/shared/statuses'
 import { NOW } from './papers'
 
@@ -17,11 +17,22 @@ export interface Conference {
   venue: string
   city: string
   organiser: string
+  /** Up to 2,000 characters. */
   theme: string
-  logoName?: string
-  logoData?: string
-  organiserLogoName?: string
-  organiserLogoData?: string
+  /** Printed on certificates of conference papers (e.g. "Proceedings of ICAMT 2026, Volume 1"). */
+  volumeName?: string
+  keyMembers?: { name: string; designation: string }[]
+  highlights?: string
+  /** Markdown. */
+  editorialNote?: string
+  sponsoredBy?: string
+  contactEmail?: string
+  contactPhone?: string
+  coverPage?: FileRef
+  proceedingsBook?: FileRef
+  brochure?: FileRef
+  photos?: FileRef[]
+  manuscriptTemplate?: FileRef
   submissionDeadline: string
   cameraReadyDeadline: string
   /** Optional conference-specific article processing charge. */
@@ -48,6 +59,15 @@ export function buildConferences(): Conference[] {
       organiser: 'Department of Mechanical Engineering, Gujarat University',
       theme: 'Smart materials and digital manufacturing for resilient industry',
       submissionDeadline: '2026-11-10', cameraReadyDeadline: '2026-11-25', apc: { currency: 'INR', amount: 2500 }, createdAt: at('2026-06-02'),
+      volumeName: 'Proceedings of ICAMT 2026, Volume 1', sponsoredBy: 'Gujarat Council on Science & Technology',
+      contactEmail: 'icamt2026@gujaratuni.example', contactPhone: '+91 79 2630 0110',
+      keyMembers: [
+        { name: 'Prof. Hemant Kulkarni', designation: 'Conference Chair, Head of Mechanical Engineering' },
+        { name: 'Dr. Ritu Agarwal', designation: 'Programme Chair, IIM Kozhikode' },
+        { name: 'Dr. Olivia Grant', designation: 'Keynote Chair, University College London' },
+      ],
+      highlights: 'Three keynotes on smart materials, a poster session with 40 student teams, and an industry panel on additive manufacturing supply chains.',
+      editorialNote: 'We are pleased to present the proceedings of **ICAMT 2026**. Every paper was reviewed by at least two experts before acceptance.\n\n- 62 submissions received\n- 31 accepted after peer review',
     },
     {
       id: 'conf-ncmrt-2027', journal: 'JIMRT', name: 'National Conference on Management Research & Technology', shortName: 'NCMRT 2027',

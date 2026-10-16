@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom'
 import { BadgeCheck, CircleDollarSign, Clock, Factory, FilePlus2, Gavel, Send, Wallet } from 'lucide-react'
 import { getAdminOverview, getRecentActivity } from '@/mock/api/dashboard'
 import { useSession } from '@/mock/store'
+import { paperStagePath } from '@/lib/paperRoutes'
 import { useJournals } from '@/permissions/hooks'
 import { useAsync } from '@/lib/useAsync'
 import { formatDate, formatMoney, formatNumber, formatPercent, formatTime } from '@/shared/formatters'
@@ -78,7 +79,7 @@ export function AdminDashboard() {
               <ul className="divide-y divide-line">
                 {o!.dispatch.items.slice(0, 5).map((p) => (
                   <li key={p.id} className="flex items-center justify-between gap-3 px-4 py-2.5">
-                    <div className="min-w-0"><Link to={`/submissions/${p.id}`} className="whitespace-nowrap text-sm font-medium text-accent hover:underline">{p.id}</Link><p className="truncate text-xs text-muted">Acceptance email · {p.authorEmail}</p></div>
+                    <div className="min-w-0"><Link to={paperStagePath('super_admin', p)} className="whitespace-nowrap text-sm font-medium text-accent hover:underline">{p.id}</Link><p className="truncate text-xs text-muted">Acceptance email · {p.authorEmail}</p></div>
                     {scope === 'ALL' && <JournalBadge code={p.journal} />}
                   </li>
                 ))}
