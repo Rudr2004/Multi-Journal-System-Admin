@@ -10,6 +10,7 @@ import { BOARD_GROUPS, type BoardGroup, type BoardMember } from '@/mock/data/web
 import { saveMember } from '@/mock/api/board'
 import type { JournalCode } from '@/shared/types'
 import { Avatar } from '../shared'
+import { TagInput } from './TagInput'
 
 const isUrl = (v: string) => { try { const u = new URL(v); return u.protocol === 'http:' || u.protocol === 'https:' } catch { return false } }
 const optionalUrl = (msg: string) => z.string().trim().refine((v) => v === '' || isUrl(v), msg)
@@ -25,6 +26,9 @@ const memberSchema = z
     orcid: z.string().trim().refine((v) => v === '' || /^\d{4}-\d{4}-\d{4}-\d{3}[\dX]$/.test(v), 'Use the format 0000-0002-1825-0097.'),
     scholar: optionalUrl('Enter a full link starting with https://'),
     scopus: optionalUrl('Enter a full link starting with https://'),
+    researchgate: optionalUrl('Enter a full link starting with https://'),
+    linkedin: optionalUrl('Enter a full link starting with https://'),
+    website: optionalUrl('Enter a full link starting with https://'),
     termStart: z.string().min(1, 'Choose when the term starts.'),
     termEnd: z.string().min(1, 'Choose when the term ends.'),
   })
@@ -47,11 +51,13 @@ function MemberFormBody({ onClose, journal, member, defaultGroup, onSaved }: { o
   const { register, handleSubmit, watch, formState: { errors, isSubmitting, isDirty } } = useForm<MemberForm>({
     resolver: zodResolver(memberSchema),
     defaultValues: member
-      ? { name: member.name, group: member.group, designation: member.designation, affiliation: member.affiliation, country: member.country, bio: member.bio, orcid: member.orcid, scholar: member.scholar, scopus: member.scopus, termStart: member.termStart, termEnd: member.termEnd }
-      : { name: '', group: defaultGroup ?? 'Editorial Board', designation: '', affiliation: '', country: '', bio: '', orcid: '', scholar: '', scopus: '', termStart: `${year}-01-01`, termEnd: `${year + 2}-12-31` },
+      ? { name: member.name, group: member.group, designation: member.designation, affiliation: member.affiliation, country: member.country, bio: member.bio, orcid: member.orcid, scholar: member.scholar, scopus: member.scopus, researchgate: member.researchgate ?? '', linkedin: member.linkedin ?? '', website: member.website ?? '', termStart: member.termStart, termEnd: member.termEnd }
+      : { name: '', group: defaultGroup ?? 'Editorial Board', designation: '', affiliation: '', country: '', bio: '', orcid: '', scholar: '', scopus: '', researchgate: '', linkedin: '', website: '', termStart: `${year}-01-01`, termEnd: `${year + 2}-12-31` },
   })
   const [photo, setPhoto] = useState<string | undefined>(member?.photo)
   const [photoDirty, setPhotoDirty] = useState(false)
+  const [expertise, setExpertise] = useState<string[]>(member?.expertise ?? [])
+  const expertiseDirty = JSON.stringify(expertise) !== JSON.stringify(member?.expertise ?? [])
   const fileRef = useRef<HTMLInputElement>(null)
   const name = watch('name')
 
@@ -66,7 +72,7 @@ function MemberFormBody({ onClose, journal, member, defaultGroup, onSaved }: { o
 
   const submit = handleSubmit(async (v) => {
     try {
-      await saveMember({ ...v, id: member?.id, journal, photo })
+      await saveMember({ ...v, id: member?.id, journal, photo, expertise })
       toast.success(member ? `Saved changes to ${v.name}.` : `${v.name} added to the ${journal} board.`)
       onSaved()
       onClose()
@@ -105,11 +111,15 @@ function MemberFormBody({ onClose, journal, member, defaultGroup, onSaved }: { o
           </div>
         )}
       </FormField>
+      <TagInput label="Area of expertise" value={expertise} onChange={setExpertise} placeholder="e.g. Smart materials, Machine learning" hint="Subjects this member can review or advise on. Type one and press Enter (up to 10)." />
       <fieldset className="space-y-4 rounded-lg border border-line p-3">
         <legend className="px-1 text-xs font-medium text-muted">Profiles</legend>
         <FormField label="ORCID iD" error={errors.orcid?.message}>{(a) => <input {...a} {...register('orcid')} className="input" placeholder="0000-0002-1825-0097" />}</FormField>
         <FormField label="Google Scholar link" error={errors.scholar?.message}>{(a) => <input {...a} {...register('scholar')} className="input" placeholder="https://scholar.google.com/citations?user=…" />}</FormField>
         <FormField label="Scopus link" error={errors.scopus?.message}>{(a) => <input {...a} {...register('scopus')} className="input" placeholder="https://www.scopus.com/authid/detail.uri?authorId=…" />}</FormField>
+        <FormField label="ResearchGate profile" error={errors.researchgate?.message}>{(a) => <input {...a} {...register('researchgate')} className="input" placeholder="https://www.researchgate.net/profile/…" />}</FormField>
+        <FormField label="LinkedIn profile" error={errors.linkedin?.message}>{(a) => <input {...a} {...register('linkedin')} className="input" placeholder="https://www.linkedin.com/in/…" />}</FormField>
+        <FormField label="Personal portfolio / website" error={errors.website?.message}>{(a) => <input {...a} {...register('website')} className="input" placeholder="https://…" />}</FormField>
       </fieldset>
       <div className="grid gap-4 sm:grid-cols-2">
         <FormField label="Term starts" required error={errors.termStart?.message}>{(a) => <input {...a} type="date" {...register('termStart')} className="input" />}</FormField>
@@ -117,7 +127,7 @@ function MemberFormBody({ onClose, journal, member, defaultGroup, onSaved }: { o
       </div>
       <div className="sticky bottom-0 -mx-5 -mb-5 flex justify-end gap-2 border-t border-line bg-surface px-5 py-3">
         <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
-        <button type="submit" className="btn-primary" disabled={isSubmitting || (!!member && !isDirty && !photoDirty)}>{isSubmitting ? 'Saving…' : member ? 'Save changes' : 'Add member'}</button>
+        <button type="submit" className="btn-primary" disabled={isSubmitting || (!!member && !isDirty && !photoDirty && !expertiseDirty)}>{isSubmitting ? 'Saving…' : member ? 'Save changes' : 'Add member'}</button>
       </div>
     </form>
   )

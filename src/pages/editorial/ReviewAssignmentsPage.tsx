@@ -1,5 +1,5 @@
-import { useMemo } from 'react'
-import { Bell, ClipboardList, Info, UserX } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import { Bell, ClipboardList, UserX, UserCog } from 'lucide-react'
 import { PageHeader } from '@/layout/PageHeader'
 import { DataTable, type Column } from '@/components/DataTable'
 import { Badge, JournalBadge } from '@/components/Badges'
@@ -8,7 +8,10 @@ import { RelativeTime } from '@/components/Time'
 import { EmptyState } from '@/components/States'
 import { useIsAllJournals } from '@/lib/scope'
 import { useAsync } from '@/lib/useAsync'
-import { listReviewAssignments, type PanelAssignmentStatus, type ReviewAssignmentRow } from '@/mock/api/reviews'
+import { listReviewAssignments, type AllSubmissionRow, type PanelAssignmentStatus, type ReviewAssignmentRow } from '@/mock/api/reviews'
+import { AssignExternalDialog } from './AssignExternalDialog'
+import { useDataStore } from '@/mock/store'
+import { useEditorialStore } from '@/mock/stores/editorial'
 import { useSession } from '@/mock/store'
 import { SubjectTags, TitleText, useAccess } from './shared'
 
@@ -22,7 +25,10 @@ export function ReviewAssignmentsPage() {
   const ctx = useAccess('reviewAssign')
   const on = useSession((s) => s.flags.reviewPanel)
   const allJournals = useIsAllJournals()
-  const q = useAsync(() => (on ? listReviewAssignments(ctx.journals) : Promise.resolve([] as ReviewAssignmentRow[])), [ctx, on])
+  const papers = useDataStore((s) => s.papers)
+  const overrides = useEditorialStore((s) => s.panelOverrides)
+  const q = useAsync(() => (on ? listReviewAssignments(ctx.journals) : Promise.resolve([] as ReviewAssignmentRow[])), [ctx, on, papers, overrides])
+  const [reassigning, setReassigning] = useState<AllSubmissionRow | null>(null)
 
   const columns = useMemo<Column<ReviewAssignmentRow>[]>(() => {
     const c: Column<ReviewAssignmentRow>[] = [
@@ -40,6 +46,12 @@ export function ReviewAssignmentsPage() {
           ? <span className="inline-flex items-center gap-1 text-sm"><Bell size={13} aria-hidden /> {r.reminders.count} sent{r.reminders.lastAt && <span className="text-xs text-muted">&middot; <RelativeTime value={r.reminders.lastAt} /></span>}</span>
           : <span className="text-faint">None sent</span>),
       },
+      {
+        id: 'reassign', header: '', locked: true, mobileHide: false,
+        cell: (r) => r.status === 'submitted' ? <span className="text-faint">&mdash;</span> : (
+          <button type="button" className="btn-secondary !h-8 whitespace-nowrap" onClick={() => setReassigning({ paperId: r.paperId, journal: r.journal, title: r.title, subjects: r.subjects, matched: [], status: 'under_review', submittedAt: '', panelMemberId: r.panelMemberId, panelMemberName: r.panelMemberName, due: r.due, autoReassigned: 0 })}><UserCog size={14} aria-hidden /> Reassign to Reviewer</button>
+        ),
+      },
     )
     return c
   }, [allJournals])
@@ -51,10 +63,8 @@ export function ReviewAssignmentsPage() {
         <div className="card"><EmptyState icon={UserX} title="Review Panel is switched off" hint="The Review Panel Member role is currently off, so there are no external assignments to show. A Super Admin can switch it on in Journal Settings." /></div>
       ) : (
         <>
-          <div role="note" className="mb-4 flex items-start gap-2 rounded-lg bg-subtle px-3 py-2 text-sm text-muted">
-            <Info size={16} strokeWidth={1.5} className="mt-0.5 shrink-0" aria-hidden />
-            <span>Read-only. The Editor assigns and reminds Review Panel Members; you can follow progress here. Author names are never shown.</span>
-          </div>
+          <p role="note" className="mb-4 rounded-lg bg-subtle px-3 py-2 text-sm text-muted">Use <span className="font-medium text-ink">Reassign to Reviewer</span> to withdraw a manuscript from its Review Panel Member and send it to another one. The member is told the assignment was withdrawn. Author names are never shown.</p>
+          <AssignExternalDialog row={reassigning} onClose={() => setReassigning(null)} onDone={q.reload} />
           <DataTable<ReviewAssignmentRow>
             id="review-assignments" data={q.data ?? []} columns={columns} rowKey={(r) => r.paperId}
             loading={q.loading && !q.data} error={!!q.error} onRetry={q.reload}

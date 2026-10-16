@@ -1,10 +1,13 @@
 import { addDays, parseISO } from 'date-fns'
-import type { Author, Issue, JournalCode, Paper, PaperStatus } from '@/shared/types'
+import type { Author, FileRef, Issue, JournalCode, Paper, PaperStatus } from '@/shared/types'
 import { backdatedId, doiFor } from '@/shared/paperId'
-import { addDeposit, currentActor, getAuthors, logEvent, productionAssigneeFor, recordAudit, sendMessage, updatePaper } from '../actions'
-import { buildRecord, draftSeo, hashString, readiness, type BackdatedItem, type ProductionRecord, type Readiness } from '../data/production'
+import { addDeposit, currentActor, getAuthors, logEvent, productionAssigneeFor, recordAudit, sendMessage, setPaperStatus, updatePaper } from '../actions'
+import { buildRecord, draftSeo, hashString, readiness, type BackdatedAuthorForm, type BackdatedItem, type BackdatedSubmission, type ProductionRecord, type Readiness } from '../data/production'
+import { abstractFor, conferenceFor, hash, keywordsFor, mentorFor, paperSubjects, referralFor, type FileVersion } from '../data/editorial'
+import { COUNTRIES, SUBJECT_BRANCHES, branchesFor, splitPhone } from '../data/backdatedOptions'
 import { journalByCode } from '../data/core'
 import { useDataStore } from '../store'
+import { useEditorialStore } from '../stores/editorial'
 import { useProductionStore } from '../stores/production'
 import { ApiError, delay } from './latency'
 
@@ -233,34 +236,31 @@ export async function returnToProduction(paperId: string, note: string): Promise
   await delay(undefined, 300, 600)
 }
 
-/* ---------------------------------------------------------------- */
-/* Backdated publication                                             */
-/* ---------------------------------------------------------------- */
+/* ------------------------------------------------------------------ */
+/* Backdated publication                                               */
+/* The Editor picks a past issue, re-edits a rejected / payment-pending */
+/* submission in full and files it under that issue as 'submitted'.     */
+/* ------------------------------------------------------------------ */
 
-export interface BackdateMatch {
+/** Statuses an article can have to be taken into a backdated issue. */
+export const BACKDATABLE_STATUSES: PaperStatus[] = ['rejected', 'payment_pending']
+
+export interface BackdateCandidate {
   paper: Paper
-  eligible: boolean
-  reason?: string
 }
 
-export async function searchBackdatable(query: string, journals: JournalCode[]): Promise<BackdateMatch[]> {
-  const q = query.trim().toLowerCase()
-  const backdatedFinal = new Set(pstore().backdated.map((b) => b.finalId))
-  // with no query, suggest rejected papers (the common backdating case)
-  const matches = store().papers
-    .filter((p) => journals.includes(p.journal) && (q.length < 3 ? p.status === 'rejected' : p.id.toLowerCase().includes(q) || p.title.toLowerCase().includes(q)))
-    .slice(0, 8)
-    .map((paper): BackdateMatch => {
-      if (PUBLISHED_STATUSES.includes(paper.status) || paper.status === 'indexed') return { paper, eligible: false, reason: 'Already published. Use Post-publication changes to amend a live article.' }
-      if (backdatedFinal.has(paper.id) && paper.status === 'in_production') return { paper, eligible: false, reason: 'Already in production as a backdated item.' }
-      if (paper.status === 'ready_for_approval') return { paper, eligible: false, reason: backdatedFinal.has(paper.id) ? 'Already sent to final approval as a backdated item.' : 'Already waiting in final approval.' }
-      return { paper, eligible: true }
-    })
-  return delay(matches, 250, 500)
+/** Rejected and payment-pending articles of one journal, newest submission first. */
+export async function listBackdatedCandidates(journal: JournalCode): Promise<BackdateCandidate[]> {
+  const rows = store().papers
+    .filter((p) => p.journal === journal && BACKDATABLE_STATUSES.includes(p.status))
+    .sort((a, b) => b.submittedAt.localeCompare(a.submittedAt))
+    .map((paper) => ({ paper }))
+  return delay(rows, 200, 400)
 }
 
+/** Published, non-conference issues of a journal, newest first. */
 export function listPastIssues(journal: JournalCode): Issue[] {
-  return store().issues.filter((i) => i.journal === journal && i.status === 'published').sort((a, b) => b.publicationDate.localeCompare(a.publicationDate))
+  return store().issues.filter((i) => i.journal === journal && i.status === 'published' && !i.conferenceId).sort((a, b) => b.publicationDate.localeCompare(a.publicationDate))
 }
 
 export function nextBackdatedSeq(journal: JournalCode) {
@@ -281,41 +281,130 @@ export async function listBackdated(journals: JournalCode[]): Promise<BackdatedI
   return delay(pstore().backdated.filter((b) => journals.includes(b.journal)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)))
 }
 
-export interface BackdateInput {
+/** Articles filed under one past issue (any status after re-submission), for the "Submitted under" table. */
+export async function listSubmittedUnderIssue(issueId: string): Promise<Paper[]> {
+  const viaItem = new Set(pstore().backdated.filter((b) => b.issueId === issueId).map((b) => b.finalId))
+  const rows = store().papers
+    .filter((p) => p.backdatedIssueId === issueId || (viaItem.has(p.id) && p.status !== 'published'))
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+  return delay(rows, 150, 300)
+}
+
+const fileRefOf = (f: FileVersion): FileRef => ({ name: f.name, size: f.sizeKb * 1024, uploadedAt: f.uploadedAt })
+const slug = (s: string) => s.toLowerCase().replace(/^(prof|dr)\.?\s+/, '').replace(/[^a-z\s]/g, '').trim().split(/\s+/)
+
+/** The form content for a paper: what the Editor saved earlier, otherwise rebuilt from the original submission. */
+export async function getBackdatedSubmission(paperId: string): Promise<BackdatedSubmission> {
+  const paper = store().papers.find((p) => p.id === paperId)
+  if (!paper) throw new ApiError('Paper not found', 'not_found')
+  const saved = pstore().backdatedSubmissions[paperId]
+  if (saved) return delay(saved, 200, 400)
+
+  const subject = paperSubjects(paper)[0] ?? Object.keys(SUBJECT_BRANCHES)[0]
+  const branches = branchesFor(subject)
+  const keywords = Array.from(new Set([...keywordsFor(paper), ...paperSubjects(paper).map((s) => s.toLowerCase())])).slice(0, 6)
+  const files = (useEditorialStore.getState().files[paperId] ?? []).slice().sort((a, b) => b.version - a.version)
+  const manuscripts = files.filter((f) => f.kind === 'manuscript')
+  const copyright = files.find((f) => /copyright/i.test(f.name))
+  const mentorRaw = mentorFor(paper)
+  let mentor: BackdatedSubmission['mentor']
+  if (mentorRaw) {
+    const [name, institution = ''] = mentorRaw.split(' · ')
+    const parts = slug(name)
+    mentor = { name, institution, email: `${parts[0]}.${parts[parts.length - 1]}@${slug(institution)[0] ?? 'university'}.example`, phone: `+91 9${String(hash(paperId)).padStart(9, '0').slice(0, 4)} ${String(hash(name)).padStart(5, '0').slice(0, 5)}` }
+  }
+  const conference = conferenceFor(paper)
+  const authors: BackdatedAuthorForm[] = getAuthors(paperId).map((a, i) => {
+    const ph = splitPhone(a.phone)
+    return {
+      name: a.name, email: a.email, phoneCode: ph.code, phone: ph.number, country: COUNTRIES.includes(a.country) ? a.country : 'Other', affiliation: a.affiliation,
+      orcid: a.orcid ?? '', photo: a.photo ? { name: `${a.name.replace(/\s+/g, '_')}_photo`, size: 0, uploadedAt: paper.submittedAt, data: a.photo } : null,
+      corresponding: a.corresponding ?? i === 0,
+    }
+  })
+  if (authors.length && !authors.some((a) => a.corresponding)) authors[0].corresponding = true
+  const out: BackdatedSubmission = {
+    paperId, issueId: '', subject, branch: branches.length ? branches[hash(paperId) % branches.length] : '', abstract: abstractFor(paper), keywords, mentor,
+    referralCode: referralFor(paper)?.code ?? '', conference: conference === 'None' ? '' : conference,
+    manuscript: manuscripts[0] ? fileRefOf(manuscripts[0]) : null, previousManuscripts: manuscripts.slice(1).map(fileRefOf),
+    supplementary: files.filter((f) => f.kind === 'supplementary' && f !== copyright).map(fileRefOf), copyright: copyright ? fileRefOf(copyright) : null,
+    declarations: { original: true, ethics: true, copyright: true, consent: true }, authors, savedAt: paper.updatedAt, savedBy: paper.author,
+  }
+  return delay(out, 200, 400)
+}
+
+export interface BackdatedSubmitInput {
   paperId: string
-  title: string
-  author: string
-  articleType: string
-  acceptNote: string
   issueId: string
+  articleType: string
+  title: string
+  form: Omit<BackdatedSubmission, 'paperId' | 'issueId' | 'savedAt' | 'savedBy'>
+  /** Keep the original Paper ID, or generate IJMAT.V1I1.100 from the journal's backdated sequence. */
   generateId: boolean
+  reason: string
+}
+
+export interface BackdatedSubmitResult {
+  item: BackdatedItem
+  paper: Paper
+  newManuscriptVersion?: number
 }
 
 function renamePaper(oldId: string, newId: string) {
   const s = store()
   const rec = pstore().records[oldId]
+  const sub = pstore().backdatedSubmissions[oldId]
+  const re = <T,>(m: Record<string, T>) => Object.fromEntries(Object.entries(m).map(([k, v]) => [k === oldId ? newId : k, v])) as Record<string, T>
   s.patch({
     papers: s.papers.map((p) => (p.id === oldId ? { ...p, id: newId } : p)),
     events: s.events.map((e) => (e.paperId === oldId ? { ...e, paperId: newId } : e)),
     payments: s.payments.map((p) => (p.paperId === oldId ? { ...p, paperId: newId } : p)),
     messages: s.messages.map((m) => (m.paperId === oldId ? { ...m, paperId: newId } : m)),
-    authorsOverride: Object.fromEntries(Object.entries(s.authorsOverride).map(([k, v]) => [k === oldId ? newId : k, v])),
+    authorsOverride: re(s.authorsOverride),
+  })
+  const ed = useEditorialStore.getState()
+  ed.patch({
+    files: re(Object.fromEntries(Object.entries(ed.files).map(([k, v]) => [k, v.map((f) => (f.paperId === oldId ? { ...f, paperId: newId } : f))]))),
+    reviews: ed.reviews.map((r) => (r.paperId === oldId ? { ...r, paperId: newId } : r)),
+    decisions: ed.decisions.map((d) => (d.paperId === oldId ? { ...d, paperId: newId } : d)),
+    history: ed.history.map((e) => (e.paperId === oldId ? { ...e, paperId: newId } : e)),
+    reminders: re(ed.reminders),
+    panelOverrides: re(ed.panelOverrides),
   })
   if (rec) {
     const { [oldId]: _drop, ...rest } = pstore().records
     void _drop
     pstore().patch({ records: { ...rest, [newId]: { ...rec, paperId: newId } } })
   }
+  if (sub) {
+    const { [oldId]: _d2, ...rest } = pstore().backdatedSubmissions
+    void _d2
+    pstore().patch({ backdatedSubmissions: { ...rest, [newId]: { ...sub, paperId: newId } } })
+  }
 }
 
-export async function submitBackdated(input: BackdateInput): Promise<BackdatedItem> {
+const extOf = (name: string): 'docx' | 'pdf' => (/\.pdf$/i.test(name) ? 'pdf' : 'docx')
+
+/**
+ * Saves the re-edited submission and files the article under the chosen past issue as 'submitted'.
+ * The Editor then re-accepts it through the normal decision flow; Final approval stays locked to this issue.
+ */
+export async function submitBackdatedSubmission(input: BackdatedSubmitInput): Promise<BackdatedSubmitResult> {
   const paper = store().papers.find((p) => p.id === input.paperId)
   const issue = store().issues.find((i) => i.id === input.issueId)
   if (!paper) throw new ApiError('Paper not found', 'not_found')
-  if (!issue || issue.status !== 'published') throw new ApiError('Choose a past (published) issue.')
+  if (!BACKDATABLE_STATUSES.includes(paper.status)) throw new ApiError('Only rejected or payment-pending articles can be re-submitted into a past issue.')
+  if (!issue || issue.status !== 'published' || issue.journal !== paper.journal) throw new ApiError('Choose a past (published) issue of the same journal.')
+  const f = input.form
+  const corresponding = f.authors.find((a) => a.corresponding) ?? f.authors[0]
+  if (!corresponding) throw new ApiError('Add at least one author.')
   const originalStatus = paper.status
-  updatePaper(paper.id, { title: input.title.trim(), author: input.author.trim(), articleType: input.articleType }, { audit: 'Backdated: details edited' })
-  logEvent(paper.id, `re-accepted the paper for backdated publication in ${issue.label}`, input.acceptNote)
+  const before = {
+    title: paper.title, type: paper.articleType, authors: getAuthors(paper.id).length, abstract: pstore().backdatedSubmissions[paper.id]?.abstract ?? abstractFor(paper),
+    manuscript: pstore().backdatedSubmissions[paper.id]?.manuscript ?? (useEditorialStore.getState().files[paper.id] ?? []).filter((x) => x.kind === 'manuscript').sort((a, b) => b.version - a.version).map(fileRefOf)[0] ?? null,
+  }
+
+  // Article ID: keep the original or generate the next one in the journal's backdated sequence
   let finalId = paper.id
   if (input.generateId) {
     const seq = pstore().backdatedSeq[paper.journal]
@@ -324,23 +413,94 @@ export async function submitBackdated(input: BackdateInput): Promise<BackdatedIt
     renamePaper(paper.id, finalId)
     logEvent(finalId, `was assigned the backdated ID ${finalId}`, `Original ID ${paper.id} was unavailable.`)
   }
-  // production step: the Associate Editor of the journal completes it, then sends it to final approval
-  const assignee = productionAssigneeFor(paper.journal)
-  updatePaper(finalId, { status: 'in_production', assigneeId: assignee, productionDue: addDays(new Date(), 5).toISOString() }, {
-    event: `Moved to production as a backdated item for ${issue.label}`,
-    note: assignee ? `Assigned to ${userName(assignee) ?? 'the Associate Editor'}.` : 'No Associate Editor is assigned to this journal yet; assign one in User Management.',
-    audit: 'Backdated publication moved to production',
-  })
-  ensureRecord(finalId)
-  const item: BackdatedItem = {
-    id: `bd-${finalId}`, journal: paper.journal, originalId: paper.id, finalId, generatedId: input.generateId, title: input.title.trim(),
-    originalStatus: originalStatus.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase()), issueId: issue.id, issueLabel: issue.label, issueDate: issue.publicationDate,
-    createdAt: new Date().toISOString(), createdBy: currentActor(), note: input.acceptNote, status: 'in_production', unassigned: !assignee,
+
+  // Files: a changed manuscript becomes the next version; new supplementary files and a new copyright form are added
+  const ed = useEditorialStore.getState()
+  const existing = ed.files[finalId] ?? []
+  const added: FileVersion[] = []
+  const stamp = new Date().toISOString()
+  const addFile = (file: FileRef, kind: FileVersion['kind'], version: number, note: string): FileVersion => {
+    const fv: FileVersion = { id: `file-${finalId}-${kind[0]}${version}-${Date.now().toString(36)}${added.length}`, paperId: finalId, version, name: file.name, kind, format: extOf(file.name), sizeKb: Math.max(1, Math.ceil(file.size / 1024)), uploadedAt: file.uploadedAt || stamp, note }
+    added.push(fv)
+    return fv
   }
-  pstore().patch({ backdated: [item, ...pstore().backdated] })
-  recordAudit({ journal: paper.journal, action: 'Backdated publication', target: finalId, oldValue: paper.id, newValue: `${issue.label} (${issue.publicationDate})` })
-  return delay(item, 500, 900)
+  let newManuscriptVersion: number | undefined
+  const m = f.manuscript
+  if (m && (!before.manuscript || m.name !== before.manuscript.name || m.uploadedAt !== before.manuscript.uploadedAt)) {
+    newManuscriptVersion = Math.max(0, ...existing.filter((x) => x.kind === 'manuscript').map((x) => x.version)) + 1
+    addFile(m, 'manuscript', newManuscriptVersion, 'Uploaded by the Editor for backdated publication')
+  }
+  const known = new Set(existing.map((x) => x.name))
+  for (const s of f.supplementary) if (!known.has(s.name)) addFile(s, 'supplementary', 1, 'Supplementary file added by the Editor')
+  if (f.copyright && !known.has(f.copyright.name)) addFile(f.copyright, 'supplementary', 1, 'Copyright form uploaded by the Editor')
+  if (added.length) ed.patch({ files: { ...ed.files, [finalId]: [...added.filter((x) => x.kind === 'manuscript'), ...existing, ...added.filter((x) => x.kind !== 'manuscript')] } })
+
+  // Shared records: authors (in the order entered), then the paper itself
+  const authors: Author[] = f.authors.map((a) => ({
+    name: a.name.trim(), email: a.email.trim(), affiliation: a.affiliation.trim(), country: a.country, orcid: a.orcid.trim() || undefined,
+    corresponding: a.corresponding, phone: `${a.phoneCode} ${a.phone.trim()}`, photo: a.photo?.data,
+  }))
+  useDataStore.getState().patch({ authorsOverride: { ...store().authorsOverride, [finalId]: authors } })
+  const assignee = productionAssigneeFor(paper.journal)
+  updatePaper(finalId, {
+    title: input.title.trim(), author: corresponding.name.trim(), authorEmail: corresponding.email.trim(), authorCountry: corresponding.country, articleType: input.articleType,
+    status: 'submitted', backdatedIssueId: issue.id, assigneeId: assignee,
+  }, { audit: 'Backdated: status changed to submitted' })
+
+  const changes = [
+    before.title !== input.title.trim() && 'title', before.type !== input.articleType && 'article type', before.authors !== f.authors.length && 'author list',
+    before.abstract !== f.abstract.trim() && 'abstract', newManuscriptVersion && `manuscript (v${newManuscriptVersion})`,
+  ].filter(Boolean).join(', ')
+  logEvent(finalId, `re-edited the submission and filed it under ${issue.label} (${issue.publicationDate.slice(0, 10)})`, `${input.reason}${changes ? `\nChanged: ${changes}.` : ''}`)
+  logEvent(finalId, `status changed from ${originalStatus.replace(/_/g, ' ')} to submitted`, 'Awaiting the Editor’s decision.')
+
+  pstore().patch({
+    backdatedSubmissions: { ...pstore().backdatedSubmissions, [finalId]: { ...f, abstract: f.abstract.trim(), paperId: finalId, issueId: issue.id, savedAt: stamp, savedBy: currentActor() } },
+  })
+
+  // BackdatedItem: Final approval stays locked to the issue; stays 'in_production' so the normal hand-over to final approval works later
+  const item: BackdatedItem = {
+    id: `bd-${finalId}`, journal: paper.journal, originalId: input.paperId, finalId, generatedId: input.generateId, title: input.title.trim(),
+    originalStatus: originalStatus.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase()), issueId: issue.id, issueLabel: issue.label, issueDate: issue.publicationDate,
+    createdAt: stamp, createdBy: currentActor(), note: input.reason.trim(), status: 'in_production', unassigned: !assignee,
+  }
+  pstore().patch({ backdated: [item, ...pstore().backdated.filter((b) => b.finalId !== finalId && b.id !== item.id)] })
+  recordAudit({ journal: paper.journal, action: 'Backdated publication submitted', target: finalId, oldValue: `${input.paperId} (${originalStatus})`, newValue: `Submitted under ${issue.label} (${issue.publicationDate})` })
+  return delay({ item, paper: store().papers.find((p) => p.id === finalId) ?? paper, newManuscriptVersion }, 500, 900)
 }
 
 /** Re-exported so pages can redraft SEO without importing the data module twice. */
 export { draftSeo }
+
+/* ---------------------------------------------------------------- */
+/* Retraction at the author's request                                 */
+/* ---------------------------------------------------------------- */
+const RETRACTABLE: PaperStatus[] = ['paid', 'in_production', 'returned_to_production', 'ready_for_approval', 'published', 'indexed', 'corrected']
+
+/**
+ * Retract an article before or after publication. Needs the author's written consent (documented) and the Editor's explicit approval.
+ * The article page at its URL becomes a retraction notice; the DOI and bibliographic record are kept.
+ */
+export async function retractArticle(paperId: string, input: { reason: string; consentFrom: string; consentDate: string; consentExcerpt: string; consentFileName?: string; consentConfirmed: boolean; approved: boolean }): Promise<ProductionRecord> {
+  await delay(null, 500, 900)
+  const paper = store().papers.find((p) => p.id === paperId)
+  if (!paper) throw new ApiError('Paper not found', 'not_found')
+  if (!RETRACTABLE.includes(paper.status)) throw new ApiError(paper.status === 'retracted' ? 'This article is already retracted.' : 'Only papers in production or published articles can be retracted.', 'invalid')
+  if (!input.consentConfirmed || input.consentExcerpt.trim().length < 20 || !input.consentFrom.trim()) throw new ApiError('The author’s written consent by email is required and must be documented.', 'invalid')
+  if (!input.approved) throw new ApiError('The Editor must explicitly approve the retraction.', 'invalid')
+  if (input.reason.trim().length < 10) throw new ApiError('Give the reason for the retraction.', 'invalid')
+  const rec = ensureRecord(paperId)
+  const wasPublished = ['published', 'indexed', 'corrected'].includes(paper.status)
+  const at = new Date().toISOString()
+  const by = currentActor()
+  const url = rec.publication?.url ?? articleUrl(paper.journal, rec.seo.slug || paperId.toLowerCase())
+  const doi = doiFor(paperId)
+  const notice = `This article, “${rec.title}”, has been retracted at the request of its author${rec.authors.length > 1 ? 's' : ''}.\nReason: ${input.reason.trim()}\nThe retraction was approved by the Editor on ${at.slice(0, 10)}. The DOI ${doi} and the bibliographic record remain available for transparency.`
+  saveRecord(paperId, { ...rec, retraction: { at, by, approvedBy: by, reason: input.reason.trim(), wasPublished, consent: { from: input.consentFrom.trim(), date: input.consentDate, excerpt: input.consentExcerpt.trim(), fileName: input.consentFileName }, notice, url, doi } })
+  setPaperStatus(paperId, 'retracted', wasPublished ? 'Article retracted after publication at the author’s request' : 'Article retracted before publication at the author’s request', input.reason.trim())
+  logEvent(paperId, `recorded the author’s consent to retract (email from ${input.consentFrom.trim()}, ${input.consentDate})`, input.consentExcerpt.trim())
+  if (wasPublished) addDeposit(paperId, 're_deposited')
+  sendMessage({ journal: paper.journal, paperId, recipient: paper.authorEmail, channel: 'email', template: 'Retraction confirmation' })
+  recordAudit({ journal: paper.journal, action: 'Article retracted', target: paperId, oldValue: paper.status, newValue: `retracted · consent from ${input.consentFrom.trim()} on ${input.consentDate} · approved by ${by}` })
+  return ensureRecord(paperId)
+}

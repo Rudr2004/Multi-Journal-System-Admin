@@ -1,6 +1,6 @@
 import type { FieldErrors, UseFormRegister, UseFormWatch } from 'react-hook-form'
 import { z } from 'zod'
-import { FormField, Switch } from '@/components/Form'
+import { CharCount, FormField, Switch } from '@/components/Form'
 import { computeGst } from '@/shared/gst'
 import { formatMoney } from '@/shared/formatters'
 import { journalByCode } from '@/mock/data/core'
@@ -17,7 +17,17 @@ export const conferenceSchema = z.object({
   venue: z.string().trim().min(3, 'Enter the venue'),
   city: z.string().trim().min(2, 'Enter the city and country'),
   organiser: z.string().trim().min(3, 'Enter the organiser'),
-  theme: z.string().trim().min(10, 'Describe the theme in at least 10 characters').max(200),
+  theme: z.string().trim().min(10, 'Describe the theme in at least 10 characters').max(2000, 'Keep the theme to 2,000 characters or fewer'),
+  volumeName: z.string().trim().max(120, 'Keep the volume name under 120 characters'),
+  sponsoredBy: z.string().trim().max(160, 'Keep the sponsor name under 160 characters'),
+  contactEmail: z.string().trim().max(120).refine((v) => !v || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v), 'Enter a valid email address'),
+  contactPhone: z.string().trim().max(24).refine((v) => !v || /^\+?[\d\s()-]{7,}$/.test(v), 'Enter a valid phone number, e.g. +91 98765 43210'),
+  highlights: z.string().trim().max(2000, 'Keep the highlights to 2,000 characters or fewer'),
+  editorialNote: z.string().max(5000, 'Keep the editorial note to 5,000 characters or fewer'),
+  keyMembers: z.array(z.object({
+    name: z.string().trim().min(2, "Enter the member's name"),
+    designation: z.string().trim().min(2, 'Enter the designation'),
+  })),
   submissionDeadline: z.string().min(1, 'Set the submission deadline'),
   cameraReadyDeadline: z.string().min(1, 'Set the camera-ready deadline'),
   apcEnabled: z.boolean(),
@@ -34,14 +44,18 @@ export type ConferenceFormValues = z.infer<typeof conferenceSchema>
 export const toFormValues = (c?: Conference, journal?: JournalCode): ConferenceFormValues => ({
   journal: c?.journal ?? journal ?? '', name: c?.name ?? '', shortName: c?.shortName ?? '', startDate: c?.startDate ?? '', endDate: c?.endDate ?? '',
   venue: c?.venue ?? '', city: c?.city ?? '', organiser: c?.organiser ?? '', theme: c?.theme ?? '',
+  volumeName: c?.volumeName ?? '', sponsoredBy: c?.sponsoredBy ?? '', contactEmail: c?.contactEmail ?? '', contactPhone: c?.contactPhone ?? '',
+  highlights: c?.highlights ?? '', editorialNote: c?.editorialNote ?? '', keyMembers: c?.keyMembers ?? [],
   submissionDeadline: c?.submissionDeadline ?? '', cameraReadyDeadline: c?.cameraReadyDeadline ?? '',
   apcEnabled: !!c?.apc, apcCurrency: c?.apc?.currency ?? 'INR', apcAmount: c?.apc?.amount ?? NaN,
 })
 
-export const toInput = (v: ConferenceFormValues, logos: Pick<Conference, 'logoName' | 'logoData' | 'organiserLogoName' | 'organiserLogoData'>): ConferenceInput => ({
+export const toInput = (v: ConferenceFormValues): ConferenceInput => ({
   journal: v.journal as JournalCode, name: v.name, shortName: v.shortName, startDate: v.startDate, endDate: v.endDate, venue: v.venue, city: v.city,
   organiser: v.organiser, theme: v.theme, submissionDeadline: v.submissionDeadline, cameraReadyDeadline: v.cameraReadyDeadline,
-  apc: v.apcEnabled ? { currency: v.apcCurrency, amount: v.apcAmount } : undefined, ...logos,
+  volumeName: v.volumeName || undefined, sponsoredBy: v.sponsoredBy || undefined, contactEmail: v.contactEmail || undefined, contactPhone: v.contactPhone || undefined,
+  highlights: v.highlights || undefined, editorialNote: v.editorialNote || undefined, keyMembers: v.keyMembers.filter((m) => m.name.trim() || m.designation.trim()),
+  apc: v.apcEnabled ? { currency: v.apcCurrency, amount: v.apcAmount } : undefined,
 })
 
 export function ConferenceFields({ register, errors, watch, setApc, journals, lockJournal }: {
@@ -72,7 +86,26 @@ export function ConferenceFields({ register, errors, watch, setApc, journals, lo
       <FormField label="Venue" required error={errors.venue?.message}>{(a) => <input {...a} className="input" {...register('venue')} />}</FormField>
       <FormField label="City, country" required error={errors.city?.message}>{(a) => <input {...a} className="input" placeholder="Ahmedabad, India" {...register('city')} />}</FormField>
       <FormField label="Organiser" required error={errors.organiser?.message} className="sm:col-span-2">{(a) => <input {...a} className="input" {...register('organiser')} />}</FormField>
-      <FormField label="Theme" required error={errors.theme?.message} className="sm:col-span-2">{(a) => <textarea {...a} rows={2} className="input !h-auto py-2" {...register('theme')} />}</FormField>
+      <FormField label="Conference theme" required error={errors.theme?.message} className="sm:col-span-2">
+        {(a) => (
+          <>
+            <textarea {...a} rows={4} maxLength={2000} className="input !h-auto py-2" {...register('theme')} />
+            <div className="mt-1 text-right"><CharCount value={watch('theme') ?? ''} max={2000} min={10} /></div>
+          </>
+        )}
+      </FormField>
+      <FormField label="Volume name" error={errors.volumeName?.message} className="sm:col-span-2"
+        hint="Used on the certificates of conference papers, e.g. “Proceedings of ICAMT 2026, Volume 1”.">
+        {(a) => <input {...a} className="input" placeholder="Proceedings of ICAMT 2026, Volume 1" {...register('volumeName')} />}
+      </FormField>
+      {watch('volumeName')?.trim() && (
+        <p className="rounded-lg bg-subtle px-3 py-2 text-xs text-muted sm:col-span-2" aria-live="polite">
+          Certificate line: <span className="font-medium text-ink">“Published in {watch('volumeName').trim()}”</span>
+        </p>
+      )}
+      <FormField label="Sponsored by" error={errors.sponsoredBy?.message} className="sm:col-span-2">{(a) => <input {...a} className="input" placeholder="Name of the sponsor" {...register('sponsoredBy')} />}</FormField>
+      <FormField label="Contact email" error={errors.contactEmail?.message}>{(a) => <input {...a} type="email" className="input" placeholder="conference@university.edu" {...register('contactEmail')} />}</FormField>
+      <FormField label="Contact phone" error={errors.contactPhone?.message}>{(a) => <input {...a} type="tel" className="input" placeholder="+91 98765 43210" {...register('contactPhone')} />}</FormField>
       <FormField label="Submission deadline" required error={errors.submissionDeadline?.message}>{(a) => <input {...a} type="date" className="input" {...register('submissionDeadline')} />}</FormField>
       <FormField label="Camera-ready deadline" required error={errors.cameraReadyDeadline?.message}>{(a) => <input {...a} type="date" className="input" {...register('cameraReadyDeadline')} />}</FormField>
       <div className="rounded-lg border border-line p-4 sm:col-span-2">

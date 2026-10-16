@@ -31,7 +31,7 @@ const schema = z.object({
   significance: score('significance'),
   references: score('references'),
   commentsToAuthor: z.string().trim().min(50, 'Write at least 50 characters so the author can act on your feedback.').max(5000, 'Keep comments under 5,000 characters.'),
-  commentsToEditor: z.string().trim().max(3000, 'Keep confidential comments under 3,000 characters.'),
+  commentsToEditor: z.string().trim().max(3000, 'Keep the reviewer justification under 3,000 characters.'),
   recommendation: z.enum(['accept', 'minor_revision', 'major_revision', 'reject'], { error: 'Choose a recommendation.' }),
 })
 type FormValues = z.infer<typeof schema>
@@ -218,7 +218,7 @@ function ReviewForm({ ws, userId, submitting, onRequestSubmit }: { ws: WS; userI
         <FormField label="Comments to the author" required error={errors.commentsToAuthor?.message} hint="Shared with the author. Be specific and constructive.">
           {(a) => <textarea {...a} {...register('commentsToAuthor')} rows={8} className="input !h-auto py-2" placeholder="Summarise the contribution, then list the strengths and the points that must be addressed." />}
         </FormField>
-        <FormField label="Confidential comments to the editor" error={errors.commentsToEditor?.message} hint="Never shown to the author. Use for concerns about ethics, overlap or suitability.">
+        <FormField label="Reviewer Justification" error={errors.commentsToEditor?.message} hint="Explain the reasons behind your recommendation. It appears in the review report.">
           {(a) => <textarea {...a} {...register('commentsToEditor')} rows={4} className="input !h-auto py-2" />}
         </FormField>
 

@@ -101,16 +101,21 @@ export interface EditorOverview {
   total: number
 }
 
-export async function getEditorOverview(scope: JournalScope, allowed: JournalCode[]): Promise<EditorOverview> {
+/** Inclusive date range (YYYY-MM-DD). Papers are matched on their submission date. */
+export interface DateRange { from?: string; to?: string }
+const inRange = (iso: string, r?: DateRange) => { const d = iso.slice(0, 10); return (!r?.from || d >= r.from) && (!r?.to || d <= r.to) }
+
+export async function getEditorOverview(scope: JournalScope, allowed: JournalCode[], range?: DateRange): Promise<EditorOverview> {
   const ok = inScope(scope, allowed)
   const { papers, payments } = useDataStore.getState()
-  const mine = papers.filter((p) => ok(p.journal))
+  const mine = papers.filter((p) => ok(p.journal) && inRange(p.submittedAt, range))
+  const mineIds = new Set(mine.map((p) => p.id))
   return delay({
     pipeline: PIPELINE_STAGES.map((s) => ({ key: s.key, label: s.label, count: count(mine, ...s.statuses) })),
     decisions: mine.filter((p) => p.status === 'decision_pending').sort((a, b) => a.updatedAt.localeCompare(b.updatedAt)),
-    payments: payments.filter((x) => ok(x.journal) && x.status === 'pending_verification').map((payment) => ({ payment, paper: papers.find((p) => p.id === payment.paperId) })),
+    payments: payments.filter((x) => ok(x.journal) && mineIds.has(x.paperId) && x.status === 'pending_verification').map((payment) => ({ payment, paper: papers.find((p) => p.id === payment.paperId) })),
     ready: mine.filter((p) => p.status === 'ready_for_approval'),
-    corrections: useProductionStore.getState().changeRequests.filter((c) => ok(c.journal) && ['requested', 'under_review', 'version_review'].includes(c.status)),
+    corrections: useProductionStore.getState().changeRequests.filter((c) => ok(c.journal) && inRange(c.requestedAt, range) && ['requested', 'under_review', 'version_review'].includes(c.status)),
     scholarRate: avg(JOURNAL_CODES.filter(ok).map((j) => SCHOLAR_RATE[j])),
     total: mine.length,
   })

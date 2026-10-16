@@ -90,6 +90,9 @@ export function LoginPage() {
   return (
     <AuthShell title="Sign in" subtitle="One staff login for all journals." footer={<Link to="/set-password?token=invite-demo" className="hover:underline">Have an invitation link? Set your password</Link>}>
       <form onSubmit={onSubmit} className="space-y-4" noValidate>
+        {!formError && (loc.state as { suspended?: boolean; deactivated?: boolean } | null)?.suspended && <div role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">Your account has been suspended and you were signed out. Resetting your password does not restore access. Contact a Super Admin.</div>}
+        {!formError && (loc.state as { deactivated?: boolean } | null)?.deactivated && <div role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">Your account has been deactivated. Contact a Super Admin.</div>}
+        {!formError && (loc.state as { passwordUpdated?: boolean } | null)?.passwordUpdated && <div role="status" className="rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-800">Password updated. Sign in with your new password.</div>}
         {formError && <div role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{formError}</div>}
         <Field label="Work email" htmlFor="email" error={errors.email?.message}>
           <input id="email" type="email" autoComplete="username" className="input" {...register('email')} />
@@ -160,16 +163,17 @@ const forgotSchema = z.object({ email: z.string().min(1, 'Enter your email').ema
 
 export function ForgotPasswordPage() {
   const [sent, setSent] = useState(false)
+  const [token, setToken] = useState<string | undefined>()
   const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm({ resolver: zodResolver(forgotSchema), defaultValues: { email: '' } })
   return (
     <AuthShell title="Reset your password" subtitle="We will email you a link if the address belongs to a staff account." footer={<Link to="/login" className="hover:underline">Back to sign in</Link>}>
       {sent ? (
         <div role="status" className="space-y-3 text-sm">
           <p className="rounded-md border border-green-200 bg-green-50 px-3 py-2 text-green-800">If that address has an account, a reset link is on its way.</p>
-          <Link to="/set-password?token=reset-demo" className="text-accent hover:underline">Prototype: open the link from the email</Link>
+          {token && <Link to={`/set-password?token=${token}`} className="text-accent hover:underline">Prototype: open the link from the email</Link>}
         </div>
       ) : (
-        <form onSubmit={handleSubmit(async ({ email }) => { await requestPasswordReset(email); setSent(true) })} className="space-y-4" noValidate>
+        <form onSubmit={handleSubmit(async ({ email }) => { const r = await requestPasswordReset(email); setToken(r.token); setSent(true) })} className="space-y-4" noValidate>
           <Field label="Work email" htmlFor="fp-email" error={errors.email?.message}><input id="fp-email" type="email" className="input" {...register('email')} /></Field>
           <button className="btn-primary w-full" disabled={isSubmitting}>{isSubmitting ? 'Sending…' : 'Send reset link'}</button>
         </form>
@@ -187,10 +191,10 @@ export function SetPasswordPage() {
   const [params] = useSearchParams()
   const nav = useNavigate()
   const invited = params.get('token')?.startsWith('invite')
-  const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm({ resolver: zodResolver(pwSchema), defaultValues: { password: '', confirm: '' } })
+  const { register, handleSubmit, setError, formState: { errors, isSubmitting } } = useForm({ resolver: zodResolver(pwSchema), defaultValues: { password: '', confirm: '' } })
   return (
     <AuthShell title={invited ? 'Welcome — set your password' : 'Choose a new password'} subtitle={invited ? 'You were invited to the editorial dashboard.' : undefined}>
-      <form onSubmit={handleSubmit(async ({ password }) => { await setPassword(params.get('token') ?? '', password); nav('/login') })} className="space-y-4" noValidate>
+      <form onSubmit={handleSubmit(async ({ password }) => { try { await setPassword(params.get('token') ?? '', password); nav('/login', { state: { passwordUpdated: true } }) } catch (e) { setError('password', { message: (e as Error).message }) } })} className="space-y-4" noValidate>
         <Field label="New password" htmlFor="pw" error={errors.password?.message}><input id="pw" type="password" autoComplete="new-password" className="input" {...register('password')} /></Field>
         <Field label="Confirm password" htmlFor="pw2" error={errors.confirm?.message}><input id="pw2" type="password" autoComplete="new-password" className="input" {...register('confirm')} /></Field>
         <button className="btn-primary w-full" disabled={isSubmitting}>{isSubmitting ? 'Saving…' : 'Save password'}</button>

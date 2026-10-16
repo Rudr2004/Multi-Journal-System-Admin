@@ -1,9 +1,11 @@
 import { useMemo, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { paperStagePath } from '@/lib/paperRoutes'
+import { useRole } from '@/permissions/hooks'
 import { Download, FileText, UserPlus, Users } from 'lucide-react'
 import { PageHeader } from '@/layout/PageHeader'
 import { DataTable, SelectFilter, type Column } from '@/components/DataTable'
-import { JournalBadge, StatusBadge } from '@/components/Badges'
+import { Badge, JournalBadge, StatusBadge } from '@/components/Badges'
 import { Dialog } from '@/components/Dialog'
 import { FormField } from '@/components/Form'
 import { RelativeTime } from '@/components/Time'
@@ -16,8 +18,8 @@ import { formatDate } from '@/shared/formatters'
 import { PIPELINE_STAGES, STATUS_META } from '@/shared/statuses'
 import type { Paper, PaperStatus, PaymentStatus } from '@/shared/types'
 import { assignAssignee, exportSubmissions, listAssignees, listSubmissions, type SubmissionRow } from '@/mock/api/papers'
-import { CONFERENCES } from '@/mock/data/editorial'
 import { useDataStore } from '@/mock/store'
+import { useEditorialStore } from '@/mock/stores/editorial'
 import { AssignReviewerDialog } from './AssignReviewerDialog'
 import { PAYMENT_LABEL, PaperIdLink, PaymentStatusBadge, TitleText, useAccess } from './shared'
 
@@ -27,27 +29,31 @@ interface Filters {
   payment: string
   type: string
   conference: string
-  assignee: string
+  issue: string
+  report: string
   from: string
   to: string
 }
-const EMPTY: Filters = { stage: '', status: '', payment: '', type: '', conference: '', assignee: '', from: '', to: '' }
+const EMPTY: Filters = { stage: '', status: '', payment: '', type: '', conference: '', issue: '', report: '', from: '', to: '' }
 
 export function SubmissionsPage() {
   const navigate = useNavigate()
+  const role = useRole()
   const ctx = useAccess('submissions')
   const { can, why } = usePermission('submissions')
   const allJournals = useIsAllJournals()
-  const users = useDataStore((s) => s.users)
+  const issueList = useDataStore((s) => s.issues)
+  const reviewRecords = useEditorialStore((s) => s.reviews)
+  const reviewed = useMemo(() => new Set(reviewRecords.map((r) => r.paperId)), [reviewRecords])
   const q = useAsync(() => listSubmissions(ctx), [ctx])
-  const [filters, setFilters] = useState<Filters>(EMPTY)
+  const [params] = useSearchParams()
+  const [filters, setFilters] = useState<Filters>({ ...EMPTY, conference: params.get('conference') ?? '' })
   const [reviewerFor, setReviewerFor] = useState<Paper[]>([])
   const [assigneeFor, setAssigneeFor] = useState<Paper[]>([])
   const clearRef = useRef<() => void>(() => undefined)
   const [exporting, setExporting] = useState(false)
 
   const rows = useMemo(() => q.data ?? [], [q.data])
-  const nameOf = useMemo(() => new Map(users.map((u) => [u.id, u.name])), [users])
   const set = <K extends keyof Filters>(k: K, v: Filters[K]) => setFilters((f) => ({ ...f, [k]: v }))
   const active = Object.values(filters).some(Boolean)
 
@@ -59,21 +65,24 @@ export function SubmissionsPage() {
       if (filters.payment && r.paymentStatus !== filters.payment) return false
       if (filters.type && r.articleType !== filters.type) return false
       if (filters.conference && r.conference !== filters.conference) return false
-      if (filters.assignee && (filters.assignee === '_none' ? !!r.assigneeId : r.assigneeId !== filters.assignee)) return false
+      if (filters.issue && (filters.issue === '_none' ? !!r.backdatedIssueId : r.backdatedIssueId !== filters.issue)) return false
+      if (filters.report && (filters.report === 'available') !== reviewed.has(r.id)) return false
       const day = r.submittedAt.slice(0, 10)
       if (filters.from && day < filters.from) return false
       if (filters.to && day > filters.to) return false
       return true
     })
-  }, [rows, filters])
+  }, [rows, filters, reviewed])
 
+  const issueLabel = useMemo(() => new Map(issueList.map((i) => [i.id, i.label])), [issueList])
+  const backdatedIssues = useMemo(() => [...new Set(rows.map((r) => r.backdatedIssueId).filter((x): x is string => !!x))], [rows])
   const types = useMemo(() => [...new Set(rows.map((r) => r.articleType))].sort(), [rows])
-  const assignees = useMemo(() => [...new Set(rows.map((r) => r.assigneeId).filter((x): x is string => !!x))], [rows])
 
   const columns = useMemo<Column<SubmissionRow>[]>(() => {
     const cols: Column<SubmissionRow>[] = [
-      { id: 'id', header: 'Paper ID', locked: true, sort: (r) => r.id, cell: (r) => <PaperIdLink id={r.id} /> },
-      { id: 'title', header: 'Title', sort: (r) => r.title, className: 'min-w-[260px]', cell: (r) => <TitleText title={r.title} /> },
+      { id: 'submitted', header: 'Submission date', locked: true, sort: (r) => r.submittedAt, cell: (r) => <span className="whitespace-nowrap">{formatDate(r.submittedAt)}</span> },
+      { id: 'id', header: 'Paper ID', sort: (r) => r.id, cell: (r) => <PaperIdLink id={r.id} to={paperStagePath(role, r)} /> },
+      { id: 'title', header: 'Title', sort: (r) => r.title, className: 'min-w-[260px]', cell: (r) => <Link to={paperStagePath(role, r)} className="block hover:text-accent"><TitleText title={r.title} /></Link> },
     ]
     if (allJournals) cols.push({ id: 'journal', header: 'Journal', sort: (r) => r.journal, cell: (r) => <JournalBadge code={r.journal} /> })
     cols.push(
@@ -81,14 +90,13 @@ export function SubmissionsPage() {
       { id: 'status', header: 'Status', sort: (r) => STATUS_META[r.status].order, cell: (r) => <StatusBadge status={r.status} /> },
       { id: 'payment', header: 'Payment', sort: (r) => r.paymentStatus, cell: (r) => <PaymentStatusBadge status={r.paymentStatus} /> },
       { id: 'type', header: 'Type', sort: (r) => r.articleType, cell: (r) => <span className="whitespace-nowrap text-muted">{r.articleType}</span> },
-      { id: 'reviewer', header: 'Reviewer', sort: (r) => nameOf.get(r.reviewerId ?? '') ?? '', cell: (r) => r.reviewerId ? <span className="whitespace-nowrap">{nameOf.get(r.reviewerId)}</span> : <span className="text-faint">—</span> },
-      { id: 'assignee', header: 'Assignee', sort: (r) => nameOf.get(r.assigneeId ?? '') ?? '', cell: (r) => r.assigneeId ? <span className="whitespace-nowrap">{nameOf.get(r.assigneeId)}</span> : <span className="text-faint">Unassigned</span> },
+      { id: 'report', header: 'Review Report', sort: (r) => Number(reviewed.has(r.id)), cell: (r) => reviewed.has(r.id) ? <Badge tone="success">Available</Badge> : <Badge tone="neutral">Not Available</Badge> },
       { id: 'conference', header: 'Conference', defaultHidden: true, sort: (r) => r.conference, cell: (r) => <span className="whitespace-nowrap text-muted">{r.conference}</span> },
-      { id: 'submitted', header: 'Submitted', sort: (r) => r.submittedAt, cell: (r) => <span className="whitespace-nowrap">{formatDate(r.submittedAt)}</span> },
+      { id: 'issue', header: 'Volume / Issue', defaultHidden: true, sort: (r) => issueLabel.get(r.backdatedIssueId ?? '') ?? '', cell: (r) => r.backdatedIssueId ? <span className="whitespace-nowrap">{issueLabel.get(r.backdatedIssueId) ?? r.backdatedIssueId}</span> : <span className="text-faint">—</span> },
       { id: 'updated', header: 'Last update', defaultHidden: true, sort: (r) => r.updatedAt, cell: (r) => <span className="whitespace-nowrap text-muted"><RelativeTime value={r.updatedAt} /></span> },
     )
     return cols
-  }, [allJournals, nameOf])
+  }, [allJournals, role, reviewed, issueLabel])
 
   const exportCsv = async () => {
     setExporting(true)
@@ -125,7 +133,7 @@ export function SubmissionsPage() {
         loading={q.loading && !q.data}
         error={!!q.error}
         onRetry={q.reload}
-        onRowClick={(r) => navigate(`/submissions/${r.id}`)}
+        onRowClick={(r) => navigate(paperStagePath(role, r))}
         search={{ placeholder: 'Search Paper ID, title, author or email', text: (r) => `${r.id} ${r.title} ${r.author} ${r.authorEmail}` }}
         selectable
         pageSize={10}
@@ -142,8 +150,8 @@ export function SubmissionsPage() {
             <SelectFilter label="Status" value={filters.status} onChange={(v) => set('status', v)} options={(Object.keys(STATUS_META) as PaperStatus[]).map((s) => ({ value: s, label: STATUS_META[s].label }))} />
             <SelectFilter label="Payment" value={filters.payment} onChange={(v) => set('payment', v)} options={(Object.keys(PAYMENT_LABEL) as PaymentStatus[]).map((s) => ({ value: s, label: PAYMENT_LABEL[s].label }))} />
             <SelectFilter label="Type" value={filters.type} onChange={(v) => set('type', v)} options={types.map((t) => ({ value: t, label: t }))} />
-            <SelectFilter label="Conference" value={filters.conference} onChange={(v) => set('conference', v)} options={CONFERENCES.map((c) => ({ value: c, label: c }))} />
-            <SelectFilter label="Assignee" value={filters.assignee} onChange={(v) => set('assignee', v)} options={[{ value: '_none', label: 'Unassigned' }, ...assignees.map((id) => ({ value: id, label: nameOf.get(id) ?? id }))]} />
+            <SelectFilter label="Volume / Issue" value={filters.issue} onChange={(v) => set('issue', v)} options={[{ value: '_none', label: 'Not backdated' }, ...backdatedIssues.map((id) => ({ value: id, label: issueLabel.get(id) ?? id }))]} />
+            <SelectFilter label="Review Report" value={filters.report} onChange={(v) => set('report', v)} options={[{ value: 'available', label: 'Available' }, { value: 'unavailable', label: 'Not Available' }]} />
             <div className="flex items-center gap-1.5 text-xs text-muted">
               <input type="date" aria-label="Submitted from" className="input !w-auto" value={filters.from} max={filters.to || undefined} onChange={(e) => set('from', e.target.value)} />
               <span aria-hidden>–</span>

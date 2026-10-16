@@ -39,11 +39,15 @@ export function BoardPreview({ journal, members }: { journal: JournalCode; membe
                       <p className="text-sm text-muted">{m.designation}</p>
                       <p className="text-sm">{m.affiliation}, {m.country}</p>
                       {lead && m.bio && <p className="mt-1 text-sm text-muted">{m.bio}</p>}
+                      {m.expertise && m.expertise.length > 0 && <p className="mt-1 flex flex-wrap gap-1">{m.expertise.map((x) => <span key={x} className="rounded-full bg-subtle px-2 py-0.5 text-[11px] text-muted">{x}</span>)}</p>}
                       <p className="mt-1 text-xs text-faint">Term: {formatDate(m.termStart)} to {formatDate(m.termEnd)}</p>
                       <p className="mt-1 flex flex-wrap gap-x-3 text-xs">
                         {m.orcid && <a className="inline-flex items-center gap-0.5 text-accent hover:underline" href={`https://orcid.org/${m.orcid}`} target="_blank" rel="noreferrer">ORCID <ExternalLink size={11} aria-hidden /></a>}
                         {m.scholar && <a className="inline-flex items-center gap-0.5 text-accent hover:underline" href={m.scholar} target="_blank" rel="noreferrer">Google Scholar <ExternalLink size={11} aria-hidden /></a>}
                         {m.scopus && <a className="inline-flex items-center gap-0.5 text-accent hover:underline" href={m.scopus} target="_blank" rel="noreferrer">Scopus <ExternalLink size={11} aria-hidden /></a>}
+                        {m.researchgate && <a className="inline-flex items-center gap-0.5 text-accent hover:underline" href={m.researchgate} target="_blank" rel="noreferrer">ResearchGate <ExternalLink size={11} aria-hidden /></a>}
+                        {m.linkedin && <a className="inline-flex items-center gap-0.5 text-accent hover:underline" href={m.linkedin} target="_blank" rel="noreferrer">LinkedIn <ExternalLink size={11} aria-hidden /></a>}
+                        {m.website && <a className="inline-flex items-center gap-0.5 text-accent hover:underline" href={m.website} target="_blank" rel="noreferrer">Website <ExternalLink size={11} aria-hidden /></a>}
                       </p>
                     </div>
                   </li>

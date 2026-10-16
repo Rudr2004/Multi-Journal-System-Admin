@@ -35,7 +35,10 @@ export async function getConference(id: string): Promise<ConferenceDetail> {
   })
 }
 
-export type ConferenceInput = Omit<Conference, 'id' | 'createdAt' | 'proceedingsIssueId'>
+/** Files and photos are saved separately (saveConferenceMedia) so they stay editable after the proceedings are published. */
+export type ConferenceMediaKey = 'coverPage' | 'proceedingsBook' | 'brochure' | 'photos' | 'manuscriptTemplate'
+export type ConferenceInput = Omit<Conference, 'id' | 'createdAt' | 'proceedingsIssueId' | ConferenceMediaKey>
+export type ConferenceMedia = Pick<Conference, ConferenceMediaKey>
 
 export async function createConference(input: ConferenceInput): Promise<Conference> {
   const conference: Conference = { ...input, id: newId('conf'), createdAt: new Date().toISOString() }
@@ -53,6 +56,17 @@ export async function saveConference(id: string, input: ConferenceInput): Promis
   patch({ conferences: conferences.map((c) => (c.id === id ? next : c)) })
   recordAudit({ journal: next.journal, action: 'Conference updated', target: next.shortName })
   return delay(next)
+}
+
+/** Uploads or removes cover page, proceedings book, brochure, photos or manuscript template. Not blocked after publishing. */
+export async function saveConferenceMedia(id: string, patchMedia: Partial<ConferenceMedia>, label: string): Promise<Conference> {
+  const { conferences, patch } = usePublishingStore.getState()
+  const before = conferences.find((c) => c.id === id)
+  if (!before) throw new ApiError('Conference not found', 'not_found')
+  const next: Conference = { ...before, ...patchMedia }
+  patch({ conferences: conferences.map((c) => (c.id === id ? next : c)) })
+  recordAudit({ journal: next.journal, action: 'Conference files updated', target: next.shortName, newValue: label })
+  return delay(next, 200, 400)
 }
 
 export async function linkSubmissions(id: string, paperIds: string[]) {

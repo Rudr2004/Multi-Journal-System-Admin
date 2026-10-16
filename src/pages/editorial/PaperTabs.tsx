@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Download, Eye, ExternalLink, MessagesSquare, RefreshCw } from 'lucide-react'
+import { Ban, Bell, Download, Eye, ExternalLink, MessagesSquare, Phone, RefreshCw, RotateCcw, UserCheck, Users } from 'lucide-react'
 import type { PaperEvent, Paper, MessageLogEntry } from '@/shared/types'
 import { formatDate, formatDateTime, formatMoney } from '@/shared/formatters'
 import { Badge } from '@/components/Badges'
@@ -14,13 +14,23 @@ import { Timeline } from '@/components/Timeline'
 import { toast } from '@/components/Toasts'
 import { GuardedButton } from '@/components/Tooltip'
 import { DocPreview, FileRow } from '@/components/Viewers'
-import { usePermission } from '@/permissions/hooks'
-import { resendMessage, type PaperDetail } from '@/mock/api/papers'
+import { useCanAct, usePermission } from '@/permissions/hooks'
+import { UserAvatar } from '@/components/UserAvatar'
+import { ReasonDialog } from '@/components/ReasonDialog'
+import { markRevisionReceived, resendMessage, type PaperDetail } from '@/mock/api/papers'
+import { sendReviewReminder } from '@/mock/api/reviews'
 import { DECISION_META, averageScore, messageContentFor, userName } from '@/mock/data/editorial'
 import { useDataStore } from '@/mock/store'
 import { useEditorialStore } from '@/mock/stores/editorial'
 import { DueChip } from '@/components/Due'
 import { ReviewReport } from './ReviewReport'
+import { AssignReviewerDialog } from './AssignReviewerDialog'
+import { ProductionReview } from './ProductionReview'
+import { AssociateEditorCard } from './AssociateEditorCard'
+import { ManualPaymentDialog } from './ManualPaymentDialog'
+import { RetractDialog } from './RetractDialog'
+import { RetractionNotice } from './RetractionNotice'
+import { useProductionStore } from '@/mock/stores/production'
 import { MessageStatusBadge, PaymentStatusBadge, RecommendationBadge, ReviewerTypeBadge, ScoreBars, SubjectTags } from './shared'
 
 /* ---------------- Overview ---------------- */
@@ -39,15 +49,23 @@ export function OverviewTab({ paper, detail }: { paper: Paper; detail: PaperDeta
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="border-b border-line text-left text-xs text-muted">
-              <tr>{['Name', 'Affiliation', 'Country', 'Email', 'ORCID'].map((h) => <th key={h} className="px-4 py-2 font-medium">{h}</th>)}</tr>
+              <tr>{['Author', 'Affiliation', 'Country', 'Contact', 'ORCID'].map((h) => <th key={h} className="px-4 py-2 font-medium">{h}</th>)}</tr>
             </thead>
             <tbody className="divide-y divide-line">
               {detail.authors.map((a, i) => (
                 <tr key={a.email}>
-                  <td className="px-4 py-2.5 align-top"><span className="whitespace-nowrap font-medium">{a.name}</span> {i === 0 && <Badge tone="accent">Submitting author</Badge>}{a.corresponding && <span className="ml-1"><Badge>Corresponding</Badge></span>}</td>
+                  <td className="px-4 py-2.5 align-top">
+                    <div className="flex items-center gap-3">
+                      <UserAvatar name={a.name} photo={a.photo} size={44} />
+                      <div className="min-w-0"><span className="whitespace-nowrap font-medium">{a.name}</span><div className="mt-0.5 flex flex-wrap gap-1">{i === 0 && <Badge tone="accent">Submitting author</Badge>}{a.corresponding && <Badge>Corresponding</Badge>}</div></div>
+                    </div>
+                  </td>
                   <td className="px-4 py-2.5 align-top text-muted">{a.affiliation}</td>
                   <td className="px-4 py-2.5 align-top whitespace-nowrap">{a.country}</td>
-                  <td className="px-4 py-2.5 align-top"><a className="text-accent hover:underline" href={`mailto:${a.email}`}>{a.email}</a></td>
+                  <td className="px-4 py-2.5 align-top">
+                    <a className="inline-flex items-center gap-1.5 whitespace-nowrap font-medium hover:text-accent" href={`tel:${(a.phone ?? '').replace(/\s/g, '')}`}><Phone size={13} aria-hidden className="text-faint" />{a.phone ?? <span className="font-normal text-faint">No number</span>}</a>
+                    <a className="mt-0.5 block text-accent hover:underline" href={`mailto:${a.email}`}>{a.email}</a>
+                  </td>
                   <td className="px-4 py-2.5 align-top whitespace-nowrap">
                     {a.orcid ? <a className="inline-flex items-center gap-1 text-accent hover:underline" href={`https://orcid.org/${a.orcid}`} target="_blank" rel="noreferrer">{a.orcid}<ExternalLink size={12} aria-hidden /></a> : <span className="text-faint">Not provided</span>}
                   </td>
@@ -71,6 +89,11 @@ export function OverviewTab({ paper, detail }: { paper: Paper; detail: PaperDeta
           { label: 'Referral', value: detail.referral ? <span>{detail.referral.code} · referred by {detail.referral.referrer} <Link to="/referrals" className="text-accent hover:underline">View credit</Link></span> : <span className="text-muted">Direct submission</span> },
         ]} />
       </SectionCard>
+
+      <section aria-label="Files">
+        <h3 className="mb-3 text-[16px] font-semibold">Files and manuscript versions</h3>
+        <FilesTab paper={paper} />
+      </section>
     </div>
   )
 }
@@ -119,25 +142,47 @@ export function ReviewTab({ paper }: { paper: Paper }) {
   const allReviews = useEditorialStore((s) => s.reviews)
   const reminders = useEditorialStore((s) => s.reminders[paper.id])
   const reviews = useMemo(() => allReviews.filter((r) => r.paperId === paper.id), [allReviews, paper.id])
+  const canAssign = useCanAct('submissions', 'approve')
+  const canRemind = useCanAct('submissions', 'work', paper.assigneeId)
+  const { why } = usePermission('submissions')
   const [open, setOpen] = useState<string>()
+  const [dlg, setDlg] = useState<'assign' | 'reassign' | 'revision' | null>(null)
+  const [busy, setBusy] = useState(false)
   const reviewer = users.find((u) => u.id === paper.reviewerId)
   const openReview = reviews.find((r) => r.id === open)
+  const inReview = ['submitted', 'screening', 'under_review', 'decision_pending'].includes(paper.status)
+  const remind = async () => {
+    setBusy(true)
+    try { await sendReviewReminder(paper.id); toast.success('Reminder queued for the reviewer') } catch (e) { toast.error(e instanceof Error ? e.message : 'Could not send the reminder.') } finally { setBusy(false) }
+  }
   return (
     <div className="space-y-5">
-      <SectionCard title="Reviewer assigned">
+      <SectionCard title="Reviewer assigned" action={
+        <div className="flex flex-wrap gap-2">
+          {inReview && <GuardedButton allowed={canAssign} why={why('approve')} className="btn-secondary !h-8" onClick={() => setDlg(reviewer ? 'reassign' : 'assign')}>{reviewer ? <><UserCheck size={14} aria-hidden /> Reassign reviewer</> : <><Users size={14} aria-hidden /> Assign reviewer</>}</GuardedButton>}
+          {paper.status === 'under_review' && reviewer && <GuardedButton allowed={canRemind} why={why('work')} className="btn-secondary !h-8" disabled={busy} onClick={remind}><Bell size={14} aria-hidden /> Send reminder</GuardedButton>}
+          {paper.status === 'changes_requested' && <GuardedButton allowed={canAssign} why={why('approve')} className="btn-secondary !h-8" onClick={() => setDlg('revision')}><RotateCcw size={14} aria-hidden /> Record revised manuscript</GuardedButton>}
+        </div>
+      }>
         {reviewer ? (
-          <DescriptionList cols={3} items={[
-            { label: 'Reviewer', value: <span className="font-medium">{reviewer.name}</span> },
-            { label: 'Type', value: <ReviewerTypeBadge kind={reviewer.assignments[paper.journal] === 'panel_member' ? 'panel' : 'in_house'} /> },
-            { label: 'Review due', value: <DueChip value={paper.reviewDue} /> },
-            { label: 'Reminders sent', value: reminders?.count ?? 0 },
-            { label: 'Last reminder', value: reminders?.lastAt ? <RelativeTime value={reminders.lastAt} /> : <span className="text-muted">None yet</span> },
-          ]} />
-        ) : <p className="text-sm text-muted">No reviewer is assigned. {paper.status === 'screening' ? 'Use “Assign reviewer” in the Actions panel.' : ''}</p>}
+          <div className="flex flex-wrap items-start gap-4">
+            <UserAvatar name={reviewer.name} photo={reviewer.photo} size={48} />
+            <div className="min-w-0 flex-1">
+              <DescriptionList cols={3} items={[
+                { label: 'Reviewer', value: <span className="font-medium">{reviewer.name}</span> },
+                { label: 'Type', value: <ReviewerTypeBadge kind={reviewer.assignments[paper.journal] === 'panel_member' ? 'panel' : 'in_house'} /> },
+                { label: 'Contact', value: reviewer.phone ? <a href={`tel:${reviewer.phone.replace(/\s/g, '')}`} className="inline-flex items-center gap-1.5 hover:text-accent"><Phone size={13} aria-hidden className="text-faint" />{reviewer.phone}</a> : <a href={`mailto:${reviewer.email}`} className="text-accent hover:underline">{reviewer.email}</a> },
+                { label: 'Review due', value: <DueChip value={paper.reviewDue} /> },
+                { label: 'Reminders sent', value: reminders?.count ?? 0 },
+                { label: 'Last reminder', value: reminders?.lastAt ? <RelativeTime value={reminders.lastAt} /> : <span className="text-muted">None yet</span> },
+              ]} />
+            </div>
+          </div>
+        ) : <p className="text-sm text-muted">No reviewer is assigned. {inReview ? 'Use “Assign reviewer” above.' : ''}</p>}
       </SectionCard>
 
       {reviews.length === 0 ? (
-        <div className="card"><EmptyState title="No review reports yet" hint={reviewer ? `${reviewer.name} has not submitted a report. You can send a reminder from the Actions panel.` : 'Reports appear here once a reviewer submits them.'} /></div>
+        <div className="card"><EmptyState title="No review reports yet" hint={reviewer ? `${reviewer.name} has not submitted a report. You can send a reminder above.` : 'Reports appear here once a reviewer submits them.'} /></div>
       ) : reviews.map((r) => (
         <SectionCard key={r.id} title={`Review by ${r.reviewerName}`} action={<button className="btn-secondary !h-8" onClick={() => setOpen(r.id)}><Eye size={14} strokeWidth={1.5} aria-hidden /> View report (PDF)</button>}>
           <div className="mb-4 flex flex-wrap items-center gap-2">
@@ -149,24 +194,35 @@ export function ReviewTab({ paper }: { paper: Paper }) {
             <ScoreBars scores={r.scores} />
             <div className="space-y-3 text-sm">
               <div><p className="label">Comments to the author</p><p className="leading-6">{r.commentsToAuthor}</p></div>
-              <div className="rounded-lg bg-amber-50 px-3 py-2 ring-1 ring-inset ring-amber-200"><p className="text-xs font-medium text-amber-800">Confidential — comments to the editor</p><p className="mt-0.5 leading-6">{r.commentsToEditor || 'None provided.'}</p></div>
+              <div className="rounded-lg bg-amber-50 px-3 py-2 ring-1 ring-inset ring-amber-200"><p className="text-xs font-medium text-amber-800">Reviewer Justification</p><p className="mt-0.5 leading-6">{r.commentsToEditor || 'None provided.'}</p></div>
             </div>
           </div>
         </SectionCard>
       ))}
+
+      <section aria-label="Decision history">
+        <h3 className="mb-3 text-[16px] font-semibold">Decision history</h3>
+        <DecisionsTab paper={paper} />
+      </section>
+
       <Drawer open={!!openReview} onClose={() => setOpen(undefined)} title="Review report" width={720}>
         {openReview && <ReviewReport review={openReview} paperTitle={paper.title} />}
       </Drawer>
+      <AssignReviewerDialog open={dlg === 'assign' || dlg === 'reassign'} reassign={dlg === 'reassign'} papers={[paper]} onClose={() => setDlg(null)} onDone={() => undefined} />
+      <ReasonDialog open={dlg === 'revision'} onClose={() => setDlg(null)} title="Record revised manuscript" label="Note on the revision" minLength={5}
+        description="The author has sent a revised file. A new version is added and the paper goes back into review."
+        confirmLabel="Record revision"
+        onSubmit={(r) => { void markRevisionReceived(paper.id, r).then(() => toast.success('Revision recorded as a new file version'), (e: Error) => toast.error(e.message)) }} />
     </div>
   )
 }
 
-/* ---------------- Decisions ---------------- */
+/* ---------------- Decisions (shown inside the Review tab) ---------------- */
 export function DecisionsTab({ paper }: { paper: Paper }) {
   const all = useEditorialStore((s) => s.decisions)
   const list = useMemo(() => all.filter((d) => d.paperId === paper.id).sort((a, b) => b.at.localeCompare(a.at)), [all, paper.id])
   if (list.length === 0) {
-    return <div className="card"><EmptyState title="No decision recorded" hint={paper.status === 'decision_pending' ? 'Review reports are in. Record a decision from the Actions panel.' : 'Decisions appear here with the reason given and who made them.'} /></div>
+    return <div className="card"><EmptyState title="No decision recorded" hint={paper.status === 'decision_pending' ? 'Review reports are in. Record a decision from the Decision panel.' : 'Decisions appear here with the reason given and who made them.'} /></div>
   }
   return (
     <ol className="space-y-3">
@@ -178,6 +234,9 @@ export function DecisionsTab({ paper }: { paper: Paper }) {
             <span className="text-xs text-muted" title={formatDateTime(d.at)}>{formatDate(d.at)} · round {d.round}</span>
           </div>
           <p className="mt-2 rounded-md bg-subtle px-3 py-2 text-sm leading-6">“{d.reason}”</p>
+          {d.basedOn && d.basedOn.length > 0 && (
+            <p className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-muted">Based on the report{d.basedOn.length > 1 ? 's' : ''} of {d.basedOn.map((b) => <span key={b.id} className="inline-flex items-center gap-1 font-medium text-ink">{b.reviewerName} <RecommendationBadge value={b.recommendation} /></span>)}</p>
+          )}
         </li>
       ))}
     </ol>
@@ -187,11 +246,17 @@ export function DecisionsTab({ paper }: { paper: Paper }) {
 /* ---------------- Payments ---------------- */
 export function PaymentsTab({ paper }: { paper: Paper }) {
   const all = useDataStore((s) => s.payments)
-  const { can } = usePermission('payments')
+  const { can, why } = usePermission('payments')
+  const [manual, setManual] = useState(false)
   const list = useMemo(() => all.filter((p) => p.paperId === paper.id), [all, paper.id])
   const METHOD: Record<string, string> = { razorpay: 'Razorpay', card: 'Card', upi: 'UPI', bank_transfer: 'Bank transfer', other: 'Other' }
+  const canRecord = ['accepted', 'payment_pending'].includes(paper.status) && !list.some((p) => p.status.startsWith('verified'))
+  const existing = list.find((p) => ['awaiting_proof', 'pending_verification', 'rejected'].includes(p.status))
   return (
-    <SectionCard title="Payments for this paper" flush action={can('view') && <Link to="/payments" className="text-sm font-medium text-accent hover:underline">Open payments</Link>}>
+    <SectionCard title="Payments for this paper" flush action={<div className="flex flex-wrap items-center gap-3">
+      {canRecord && <GuardedButton allowed={can('approve')} why={why('approve')} className="btn-primary !h-8" onClick={() => setManual(true)}>Manual payment</GuardedButton>}
+      {can('view') && <Link to="/payments" className="text-sm font-medium text-accent hover:underline">Open payments</Link>}
+    </div>}>
       {list.length === 0 ? (
         <EmptyState title="No payment recorded" hint={paper.paymentStatus === 'none' ? 'The processing charge is requested once the paper is accepted.' : `Payment status is “${paper.paymentStatus}”. Records appear here when the author pays or uploads proof.`} />
       ) : (
@@ -213,6 +278,7 @@ export function PaymentsTab({ paper }: { paper: Paper }) {
           </table>
         </div>
       )}
+      {canRecord && <ManualPaymentDialog open={manual} paper={paper} existing={existing} onClose={() => setManual(false)} />}
     </SectionCard>
   )
 }
@@ -220,11 +286,18 @@ export function PaymentsTab({ paper }: { paper: Paper }) {
 /* ---------------- Production ---------------- */
 export function ProductionTab({ paper }: { paper: Paper }) {
   const users = useDataStore((s) => s.users)
+  const finalPerm = usePermission('finalApproval')
+  const record = useProductionStore((s) => s.records[paper.id])
+  const [retracting, setRetracting] = useState(false)
+  const canRetract = ['paid', 'in_production', 'returned_to_production', 'ready_for_approval', 'published', 'indexed', 'corrected'].includes(paper.status)
   const deposits = useDataStore((s) => s.deposits)
   const { can } = usePermission('production')
   const started = ['paid', 'in_production', 'returned_to_production', 'ready_for_approval', 'published', 'indexed', 'retracted', 'corrected'].includes(paper.status)
   const deposit = deposits.filter((d) => d.paperId === paper.id).sort((a, b) => b.version - a.version)[0]
   return (
+    <div className="space-y-5">
+    {paper.status === 'ready_for_approval' && <ProductionReview paper={paper} />}
+    {started && <AssociateEditorCard paper={paper} />}
     <SectionCard title="Production summary" action={started && can('view') ? <Link to={`/production/${paper.id}`} className="btn-secondary !h-8">Open production workspace <ExternalLink size={13} aria-hidden /></Link> : undefined}>
       {started ? (
         <DescriptionList cols={3} items={[
@@ -239,6 +312,15 @@ export function ProductionTab({ paper }: { paper: Paper }) {
         <EmptyState title="Production has not started" hint="Production begins automatically once the paper is accepted and the payment is verified." />
       )}
     </SectionCard>
+    {paper.status === 'retracted' && record?.retraction && <RetractionNotice paper={paper} record={record} />}
+    {canRetract && finalPerm.can('approve') && (
+      <SectionCard title="Author withdrawal">
+        <p className="mb-3 text-sm text-muted">If the author asks to withdraw this article, retract it here, before or after publication. It needs the author’s written consent by email and your approval. The article page is replaced by a retraction notice at the same URL; the DOI and publication record are kept.</p>
+        <button type="button" className="btn-danger" onClick={() => setRetracting(true)}><Ban size={15} aria-hidden /> Retract article</button>
+        <RetractDialog open={retracting} paper={paper} onClose={() => setRetracting(false)} />
+      </SectionCard>
+    )}
+    </div>
   )
 }
 

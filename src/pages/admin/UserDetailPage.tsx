@@ -18,6 +18,8 @@ import { changeUserStatus, getUser, hasExpertiseRole, resendInvitation, resetUse
 import { categoryLabel } from '@/mock/api/audit'
 import { ExpertiseChips, ExpertisePicker, RoleChips, RoleMatrix, CopyField, UserStatusBadge, type Assignments } from './userUi'
 
+import { ChangePasswordDialog } from './ChangePasswordDialog'
+
 const messageOf = (e: unknown) => (e instanceof Error ? e.message : 'Something went wrong. Try again.')
 
 export function UserDetailPage() {
@@ -28,6 +30,7 @@ export function UserDetailPage() {
   const [editing, setEditing] = useState(false)
   const [editingExp, setEditingExp] = useState(false)
   const [confirm, setConfirm] = useState<StatusAction | 'reset' | null>(null)
+  const [changingPassword, setChangingPassword] = useState(false)
   const [link, setLink] = useState<{ title: string; text: string; url: string } | null>(null)
 
   const back = <Link to="/users" className="btn-secondary"><ArrowLeft size={15} strokeWidth={1.5} aria-hidden /> All users</Link>
@@ -127,6 +130,7 @@ export function UserDetailPage() {
                 ) : (
                   <GuardedButton allowed={manage} why={perm.why('manage')} className="btn-primary" onClick={() => setConfirm('reactivate')}><Play size={14} strokeWidth={1.5} aria-hidden /> Reactivate</GuardedButton>
                 )}
+                <GuardedButton allowed={manage} why={perm.why('manage')} onClick={() => setChangingPassword(true)}><KeyRound size={14} strokeWidth={1.5} aria-hidden /> Change password</GuardedButton>
                 <GuardedButton allowed={manage} why={perm.why('manage')} onClick={() => setConfirm('reset')}><KeyRound size={14} strokeWidth={1.5} aria-hidden /> Reset access</GuardedButton>
                 {u.status !== 'deactivated' && (
                   <GuardedButton allowed={manage && !isSelf} why={selfWhy ?? perm.why('manage')} className="btn-danger" onClick={() => setConfirm('deactivate')}><UserX size={14} strokeWidth={1.5} aria-hidden /> Deactivate</GuardedButton>
@@ -153,6 +157,8 @@ export function UserDetailPage() {
         consequences={['Permanently remove sign-in access (a Super Admin can reactivate later).', 'Keep their name on past decisions, reviews and audit entries.', 'Stop new work being assigned to them.', 'Be recorded in the audit log.']} />
       <ConfirmDialog open={confirm === 'reset'} onClose={() => setConfirm(null)} onConfirm={runReset} title={`Reset access for ${u?.name}?`} confirmLabel="Reset access"
         consequences={['Sign them out of every device.', 'Turn off their current two-step sign-in; they re-enrol on next sign-in.', 'Email a new set-password link.', 'Be recorded in the audit log.']} />
+
+      <ChangePasswordDialog user={changingPassword ? (u ?? null) : null} onClose={() => setChangingPassword(false)} onDone={reload} />
 
       <Dialog open={!!link} onClose={() => setLink(null)} title={link?.title ?? ''} footer={<button className="btn-primary" onClick={() => setLink(null)}>Done</button>}>
         <p className="mb-3 text-sm text-muted">{link?.text}</p>

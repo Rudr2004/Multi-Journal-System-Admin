@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, Trophy } from 'lucide-react'
+import { BadgeCheck, Plus, Trophy } from 'lucide-react'
 import { PageHeader } from '@/layout/PageHeader'
 import { DataTable, SelectFilter, type Column } from '@/components/DataTable'
 import { Badge, JournalBadge } from '@/components/Badges'
@@ -8,6 +8,7 @@ import { GuardedButton } from '@/components/Tooltip'
 import { useAsync } from '@/lib/useAsync'
 import { useIsAllJournals } from '@/lib/scope'
 import { usePermission } from '@/permissions/hooks'
+import { SectionCard } from '@/components/Card'
 import { formatDate } from '@/shared/formatters'
 import { AWARD_TYPE_LABEL, CYCLE_LABEL, CYCLE_STATUSES, type AwardCycle } from '@/mock/data/website'
 import { listCycles } from '@/mock/api/awards'
@@ -20,10 +21,12 @@ export default function AwardsPage() {
   const all = useIsAllJournals()
   const navigate = useNavigate()
   const { can, why } = usePermission('awards')
+  const canApprove = usePermission('awardApproval').can('approve')
   const { data, loading, error, reload } = useAsync(() => listCycles(journals), [key])
-  const [status, setStatus] = useState('')
+  const [status, setStatus] = useState(canApprove ? 'pending_approval' : '')
   const [type, setType] = useState('')
   const [creating, setCreating] = useState(false)
+  const pending = useMemo(() => (data ?? []).filter((c) => c.status === 'pending_approval'), [data])
   const rows = useMemo(() => (data ?? []).filter((c) => (!status || c.status === status) && (!type || c.type === type)), [data, status, type])
 
   const columns: Column<AwardCycle>[] = [
@@ -38,8 +41,25 @@ export default function AwardsPage() {
 
   return (
     <>
-      <PageHeader title="Awards" description="Run Best Paper and Best Research Mentor cycles from nominations to the published Awards page."
-        actions={<GuardedButton allowed={can('manage') && journals.length > 0} why={why('manage')} className="btn-primary" onClick={() => setCreating(true)}><Plus size={15} strokeWidth={1.5} aria-hidden /> New cycle</GuardedButton>} />
+      <PageHeader title={canApprove ? 'Award Approval' : 'Awards'} description={canApprove ? 'Review, approve or reject the winners Editors nominate. Nothing is issued or published until you approve it; approved cycles go back to the Editor to publish.' : 'Run Best Paper and Best Research Mentor cycles from nominations to the published Awards page.'}
+        actions={canApprove ? undefined : <GuardedButton allowed={can('manage') && journals.length > 0} why={why('manage')} className="btn-primary" onClick={() => setCreating(true)}><Plus size={15} strokeWidth={1.5} aria-hidden /> New cycle</GuardedButton>} />
+      {pending.length > 0 && (
+        <div className="mb-5">
+          <SectionCard title={`Awaiting ${canApprove ? 'your' : 'Super Admin'} approval (${pending.length})`} flush>
+            <ul className="divide-y divide-line">
+              {pending.map((c) => (
+                <li key={c.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium">{c.name}</p>
+                    <p className="text-xs text-muted">{c.journal} · {AWARD_TYPE_LABEL[c.type]} · {c.nominations.filter((n) => n.winner).length} winner(s): {c.nominations.filter((n) => n.winner).map((n) => n.name).join(', ')}</p>
+                  </div>
+                  <button type="button" className={canApprove ? 'btn-primary' : 'btn-secondary'} onClick={() => navigate(`/awards/${c.id}`)}>{canApprove ? <><BadgeCheck size={15} strokeWidth={1.5} aria-hidden /> Review and approve</> : 'View'}</button>
+                </li>
+              ))}
+            </ul>
+          </SectionCard>
+        </div>
+      )}
       <DataTable<AwardCycle>
         id="award-cycles" data={rows} columns={columns} rowKey={(c) => c.id} loading={loading && !data} error={!!error} onRetry={reload}
         onRowClick={(c) => navigate(`/awards/${c.id}`)}

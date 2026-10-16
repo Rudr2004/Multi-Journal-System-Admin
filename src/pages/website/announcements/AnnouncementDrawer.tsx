@@ -16,6 +16,7 @@ import { ANNOUNCEMENT_TYPES, announcementStatus, type Announcement, type Announc
 import { useWebsiteStore } from '@/mock/stores/website'
 import { createAnnouncements, updateAnnouncement, type AnnouncementInput } from '@/mock/api/announcements'
 import { fromLocalInput, toLocalInput } from '../shared'
+import { ImageField, type ImageValue } from '@/pages/publishing/parts'
 import { AnnouncementPreview } from './AnnouncementPreview'
 
 const urlOk = (v: string) => v === '' || /^https?:\/\/[^\s/]+\.[^\s]+$/i.test(v)
@@ -27,7 +28,7 @@ const makeSchema = (isEdit: boolean, channel: AnnouncementChannel) =>
       title: z.string().trim().min(5, 'Enter the notification text (at least 5 characters).').max(channel === 'scrolling' ? 140 : 200, `Keep the text under ${channel === 'scrolling' ? 140 : 200} characters.`),
       body: z.string().trim().max(300, 'Keep the detail under 300 characters.'),
       link: z.string().trim().refine(urlOk, 'Enter a full link starting with https://'),
-      type: z.enum(ANNOUNCEMENT_TYPES),
+      type: z.string().trim().min(2, 'Enter a type, e.g. News or Call for Papers.').max(40, 'Keep the type under 40 characters.'),
       highlight: z.boolean(),
       pinned: z.boolean(),
       mode: z.enum(['now', 'schedule']),
@@ -77,9 +78,10 @@ function Body({ announcement, channel, onClose, onSaved }: { announcement?: Anno
   })
   const v = watch()
   const [pending, setPending] = useState<Values | null>(null)
+  const [image, setImage] = useState<ImageValue | null>(announcement?.image ?? null)
 
   const toInput = (x: Values): AnnouncementInput => ({
-    channel, link: x.link.trim(), highlight: x.highlight,
+    channel, link: x.link.trim(), highlight: x.highlight, image: image ?? undefined,
     title: x.title.trim(), body: channel === 'tab' ? x.body.trim() : '', type: x.type, placements: channel === 'scrolling' ? ['topbar'] : ['page'], pinned: x.pinned,
     startAt: x.mode === 'now' ? new Date().toISOString() : fromLocalInput(x.startAt),
     endAt: x.hasEnd ? fromLocalInput(x.endAt) : undefined, emailSubscribers: x.emailSubscribers,
@@ -109,7 +111,7 @@ function Body({ announcement, channel, onClose, onSaved }: { announcement?: Anno
     () => all
       .filter((a) => a.journal === previewJournal && a.channel === channel && a.id !== announcement?.id && announcementStatus(a) === 'live')
       .slice(0, 2)
-      .map((a) => ({ text: a.title, detail: a.body, link: a.link, type: a.type, highlight: a.highlight, pinned: a.pinned })),
+      .map((a) => ({ text: a.title, detail: a.body, link: a.link, image: a.image?.data, type: a.type, highlight: a.highlight, pinned: a.pinned })),
     [all, previewJournal, channel, announcement?.id],
   )
   const journalsLabel = v.journals.length ? v.journals.join(', ') : 'selected journals'
@@ -120,7 +122,7 @@ function Body({ announcement, channel, onClose, onSaved }: { announcement?: Anno
     <form onSubmit={submit} noValidate className="space-y-5">
       <div className="sticky top-0 z-10 -mx-5 -mt-5 border-b border-line bg-surface px-5 py-3">
         <AnnouncementPreview channel={channel} journalName={previewJournal ? journalByCode(previewJournal).domain : 'journal website'} others={others}
-          current={{ text: v.title, detail: channel === 'tab' ? v.body : undefined, link: v.link, type: v.type, highlight: v.highlight, pinned: v.pinned }} />
+          current={{ text: v.title, detail: channel === 'tab' ? v.body : undefined, link: v.link, image: image?.data, type: v.type, highlight: v.highlight, pinned: v.pinned }} />
       </div>
 
       {isEdit ? (
@@ -145,7 +147,14 @@ function Body({ announcement, channel, onClose, onSaved }: { announcement?: Anno
         </fieldset>
       )}
 
-      <FormField label="Type" required>{(a) => <select {...a} {...register('type')} className="input">{ANNOUNCEMENT_TYPES.map((t) => <option key={t}>{t}</option>)}</select>}</FormField>
+      <FormField label="Type" required error={errors.type?.message} hint="Type your own, or pick a suggestion.">
+        {(a) => (
+          <>
+            <input {...a} {...register('type')} list="announcement-type-options" autoComplete="off" maxLength={40} className="input" placeholder="News" />
+            <datalist id="announcement-type-options">{ANNOUNCEMENT_TYPES.map((t) => <option key={t} value={t} />)}</datalist>
+          </>
+        )}
+      </FormField>
       <FormField label="Notification text" required error={errors.title?.message}>
         {(a) => <div><input {...a} {...register('title')} className="input" placeholder="Call for papers: Volume 4, Issue 1 (submit by 20 December)" /><div className="mt-1 text-right"><CharCount value={v.title} max={channel === 'scrolling' ? 140 : 200} /></div></div>}
       </FormField>
@@ -154,6 +163,8 @@ function Body({ announcement, channel, onClose, onSaved }: { announcement?: Anno
           {(a) => <div><textarea {...a} {...register('body')} rows={3} className="input !h-auto py-2" /><div className="mt-1 text-right"><CharCount value={v.body} max={300} /></div></div>}
         </FormField>
       )}
+      <ImageField label="Image (optional)" value={image} onChange={setImage} aspect={channel === 'tab' ? 'aspect-[16/9]' : 'aspect-square'} width={channel === 'tab' ? 'w-40' : 'w-16'}
+        hint={channel === 'tab' ? 'Banner shown with the notice on the home page. PNG, JPG, WebP or SVG up to 2 MB.' : 'Small icon shown before the text in the scrolling strip. PNG, JPG, WebP or SVG up to 2 MB.'} />
       <FormField label="Link (optional)" error={errors.link?.message} hint="Adds a Read more link to the notice.">
         {(a) => <input {...a} type="url" inputMode="url" {...register('link')} className="input" placeholder="https://" />}
       </FormField>

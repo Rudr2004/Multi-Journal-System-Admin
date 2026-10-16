@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
-import { FileUp, Lock, Plus, Trash2 } from 'lucide-react'
+import { FileUp, ImagePlus, Lock, Plus, Trash2 } from 'lucide-react'
 import { z } from 'zod'
 import { PageHeader } from '@/layout/PageHeader'
 import { SectionCard } from '@/components/Card'
@@ -15,13 +15,14 @@ import { cn } from '@/lib/utils'
 import { usePermission } from '@/permissions/hooks'
 import { newId } from '@/mock/actions'
 import { journalByCode } from '@/mock/data/core'
-import { LISTING_LABEL, SYSTEM_STATS, reconcile, statKeys, type ExternalRating, type JournalMetricsConfig, type ListingStatus, type StatPlacement } from '@/mock/data/metrics'
+import { LISTING_LABEL, SYSTEM_STATS, latestSjif, reconcile, statKeys, type CustomStat, type ExternalRating, type SjifYear, type JournalMetricsConfig, type ListingStatus, type StatPlacement } from '@/mock/data/metrics'
 import { diffMetrics, getJournalMetrics, saveJournalMetrics } from '@/mock/api/journalMetrics'
 import { useMetricsStore } from '@/mock/stores/metrics'
 import type { JournalCode } from '@/shared/types'
 import { formatDate } from '@/shared/formatters'
 import { JournalTabs, useActiveJournal } from '../shared'
 import { SortableList, moveItem } from '../SortableList'
+import { IMAGE_ACCEPT, readFileRef } from '@/pages/publishing/fields'
 import { MetricsPreview, statInfo } from './MetricsPreview'
 
 const urlOk = (v: string) => v === '' || /^https?:\/\/[^\s/]+\.[^\s]+$/i.test(v)
@@ -29,14 +30,13 @@ const thisYear = new Date().getFullYear()
 const yearOk = (v: string) => /^\d{4}$/.test(v) && Number(v) >= 2000 && Number(v) <= thisYear + 1
 
 const schema = z.object({
-  sjif: z.object({
-    value: z.string().trim().refine((v) => v === '' || (/^\d{1,3}(\.\d{1,3})?$/.test(v) && Number(v) <= 100), 'Enter a number such as 6.521.'),
-    year: z.string().trim(),
+  sjifYears: z.array(z.object({
+    id: z.string(),
+    year: z.string().trim().refine(yearOk, `Enter a year from 2000 to ${thisYear + 1}.`),
+    value: z.string().trim().refine((v) => /^\d{1,3}(\.\d{1,3})?$/.test(v) && Number(v) <= 100, 'Enter a number such as 6.521.'),
     link: z.string().trim().refine(urlOk, 'Enter a full link starting with https://'),
     certificate: z.string(),
-  }).superRefine((s, ctx) => {
-    if (s.value && !yearOk(s.year)) ctx.addIssue({ code: 'custom', path: ['year'], message: `Enter the rating year (2000 to ${thisYear + 1}).` })
-  }),
+  })),
   ratings: z.array(z.object({
     id: z.string(),
     name: z.string().trim().min(2, 'Name the rating.').max(60, 'Keep the name under 60 characters.'),
@@ -45,7 +45,13 @@ const schema = z.object({
     link: z.string().trim().refine(urlOk, 'Enter a full link starting with https://'),
     certificate: z.string(),
   })),
-  logos: z.array(z.object({ id: z.string(), verifyUrl: z.string().trim().refine(urlOk, 'Enter a full link starting with https://') }).passthrough()),
+  customStats: z.array(z.object({
+    id: z.string(),
+    label: z.string().trim().min(2, 'Name the statistic.').max(50, 'Keep the name under 50 characters.'),
+    value: z.string().trim().min(1, 'Enter the value.').max(24, 'Keep the value under 24 characters.'),
+    unit: z.string().trim().max(16, 'Keep the unit under 16 characters.'),
+  })),
+  logos: z.array(z.object({ id: z.string(), name: z.string().trim().min(2, 'Name the service.').max(60, 'Keep the name under 60 characters.'), verifyUrl: z.string().trim().refine(urlOk, 'Enter a full link starting with https://') }).passthrough()),
 })
 
 function validate(c: JournalMetricsConfig): Record<string, string> {
@@ -56,10 +62,24 @@ function validate(c: JournalMetricsConfig): Record<string, string> {
   return out
 }
 
+/** zod checks each row; this adds the rule that a year can only appear once in the SJIF history. */
+function validateAll(c: JournalMetricsConfig): Record<string, string> {
+  const out = validate(c)
+  const seen = new Map<string, number>()
+  c.sjifYears.forEach((y, i) => {
+    const yr = y.year.trim()
+    if (!yr) return
+    if (seen.has(yr)) out[`sjifYears.${i}.year`] ??= `${yr} is already in the list. Edit that row instead.`
+    else seen.set(yr, i)
+  })
+  return out
+}
+
 /** Apply an edit and keep both orderings in step with the statistics that now exist. */
 function withReconcile(c: JournalMetricsConfig): JournalMetricsConfig {
-  const keys = statKeys(c)
-  return { ...c, home: reconcile(c.home, keys, (k) => k === 'sjif'), table: reconcile(c.table, keys) }
+  const withSjif = { ...c, sjif: latestSjif(c.sjifYears) }
+  const keys = statKeys(withSjif)
+  return { ...withSjif, home: reconcile(c.home, keys, (k) => k === 'sjif' || k.startsWith('custom:')), table: reconcile(c.table, keys) }
 }
 
 function CertificateButton({ value, onChange, disabled, label }: { value: string; onChange: (name: string) => void; disabled: boolean; label: string }) {
@@ -118,7 +138,7 @@ function MetricsEditor({ journal, saved, draft, system, onDraft }: {
   const info = (key: string) => statInfo(key, cfg, system)
 
   const save = async () => {
-    const errs = validate(cfg)
+    const errs = validateAll(cfg)
     setErrors(errs)
     if (Object.keys(errs).length) { toast.error('Fix the highlighted fields before saving.'); return }
     setSaving(true)
@@ -132,24 +152,54 @@ function MetricsEditor({ journal, saved, draft, system, onDraft }: {
   }
 
   const setRating = (id: string, p: Partial<ExternalRating>) => set((c) => ({ ...c, ratings: c.ratings.map((r) => (r.id === id ? { ...r, ...p } : r)) }))
+  const setYear = (id: string, p: Partial<SjifYear>) => set((c) => ({ ...c, sjifYears: c.sjifYears.map((y) => (y.id === id ? { ...y, ...p } : y)) }))
+  const addYear = () => set((c) => {
+    const years = c.sjifYears.map((y) => Number(y.year)).filter(Boolean)
+    const next = years.length ? Math.min(Math.max(...years) + 1, thisYear + 1) : thisYear
+    return { ...c, sjifYears: [{ id: newId('sj'), year: String(next), value: '', link: '', certificate: '' }, ...c.sjifYears] }
+  })
+  const setCustom = (id: string, p: Partial<CustomStat>) => set((c) => ({ ...c, customStats: c.customStats.map((x) => (x.id === id ? { ...x, ...p } : x)) }))
+  const addLogo = () => set((c) => ({ ...c, logos: [...c.logos, { id: newId('lg'), name: '', status: 'applied', verifyUrl: '', show: false }] }))
+  const pickLogoImage = async (id: string, file?: File) => {
+    if (!file) return
+    const ref = await readFileRef(file, IMAGE_ACCEPT.accept, 1, IMAGE_ACCEPT.what)
+    if (ref) setLogo(id, { image: { name: ref.name, data: ref.data } })
+  }
   const setLogo = (id: string, p: Partial<JournalMetricsConfig['logos'][number]>) => set((c) => ({ ...c, logos: c.logos.map((l) => (l.id === id ? { ...l, ...p } : l)) }))
 
   return (
     <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_400px]">
       <div className="space-y-4">
-        <SectionCard title="External ratings (entered manually)">
+        <SectionCard title="SJIF Impact Factor Management"
+          action={<button type="button" className="btn-secondary h-8" disabled={disabled} onClick={addYear}><Plus size={14} strokeWidth={1.5} aria-hidden /> Add year</button>}>
+          <fieldset disabled={disabled}>
+            <p className="mb-3 text-sm text-muted">
+              Enter the SJIF impact factor for each year, and edit or correct any year later. The newest year is shown on the website
+              {cfg.sjif.value ? <> (currently <span className="font-medium text-ink tabular-nums">{cfg.sjif.value}</span> for {cfg.sjif.year})</> : null}.
+              Backdated Publications automatically use the value for the article&rsquo;s publication year.
+            </p>
+            {cfg.sjifYears.length === 0 && <p className="rounded-md border border-dashed border-line p-3 text-center text-sm text-muted">No SJIF values yet. Add the first year to get started.</p>}
+            <ul className="space-y-3">
+              {cfg.sjifYears.map((y, i) => (
+                <li key={y.id} className="rounded-lg border border-line p-3">
+                  <div className="grid gap-3 sm:grid-cols-[96px_140px_1fr]">
+                    <FormField label="Year" error={errors[`sjifYears.${i}.year`]}>{(a) => <input {...a} className="input" inputMode="numeric" maxLength={4} placeholder="2025" value={y.year} onChange={(e) => setYear(y.id, { year: e.target.value })} />}</FormField>
+                    <FormField label="Impact factor" error={errors[`sjifYears.${i}.value`]}>{(a) => <input {...a} className="input" inputMode="decimal" placeholder="e.g. 6.521" value={y.value} onChange={(e) => setYear(y.id, { value: e.target.value })} />}</FormField>
+                    <FormField label="Evidence link" error={errors[`sjifYears.${i}.link`]}>{(a) => <input {...a} className="input" type="url" inputMode="url" placeholder="https://" value={y.link} onChange={(e) => setYear(y.id, { link: e.target.value })} />}</FormField>
+                  </div>
+                  <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                    <CertificateButton label={`SJIF ${y.year || 'new year'} certificate`} value={y.certificate} disabled={disabled} onChange={(certificate) => setYear(y.id, { certificate })} />
+                    <button type="button" className="btn-ghost h-8 text-red-600" aria-label={`Delete SJIF ${y.year || 'row'}`} onClick={() => set((c) => ({ ...c, sjifYears: c.sjifYears.filter((x) => x.id !== y.id) }))}><Trash2 size={14} strokeWidth={1.5} aria-hidden /> Delete</button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </fieldset>
+        </SectionCard>
+
+        <SectionCard title="Other ratings (entered manually)">
           <fieldset disabled={disabled} className="space-y-4">
             <div>
-              <p className="mb-2 text-sm font-medium">SJIF</p>
-              <div className="grid gap-3 sm:grid-cols-[1fr_110px]">
-                <FormField label="SJIF value" error={errors['sjif.value']}>{(a) => <input {...a} className="input" inputMode="decimal" placeholder="e.g. 6.521" value={cfg.sjif.value} onChange={(e) => set((c) => ({ ...c, sjif: { ...c.sjif, value: e.target.value } }))} />}</FormField>
-                <FormField label="Year" error={errors['sjif.year']}>{(a) => <input {...a} className="input" inputMode="numeric" maxLength={4} placeholder="2025" value={cfg.sjif.year} onChange={(e) => set((c) => ({ ...c, sjif: { ...c.sjif, year: e.target.value } }))} />}</FormField>
-                <FormField label="Evidence link" error={errors['sjif.link']} className="sm:col-span-2" hint="The SJIF passport page that confirms this value.">{(a) => <input {...a} className="input" type="url" inputMode="url" placeholder="https://" value={cfg.sjif.link} onChange={(e) => set((c) => ({ ...c, sjif: { ...c.sjif, link: e.target.value } }))} />}</FormField>
-              </div>
-              <div className="mt-2"><p className="label">Certificate</p><CertificateButton label="SJIF certificate" value={cfg.sjif.certificate} disabled={disabled} onChange={(certificate) => set((c) => ({ ...c, sjif: { ...c.sjif, certificate } }))} /></div>
-            </div>
-
-            <div className="border-t border-line pt-4">
               <div className="mb-2 flex items-center justify-between gap-2">
                 <p className="text-sm font-medium">Other ratings</p>
                 <button type="button" className="btn-secondary h-8" disabled={disabled || cfg.ratings.length >= 8}
@@ -176,6 +226,25 @@ function MetricsEditor({ journal, saved, draft, system, onDraft }: {
           </fieldset>
         </SectionCard>
 
+        <SectionCard title="Custom statistics" action={<button type="button" className="btn-secondary h-8" disabled={disabled || cfg.customStats.length >= 10} onClick={() => set((c) => ({ ...c, customStats: [...c.customStats, { id: newId('cs'), label: '', value: '', unit: '' }] }))}><Plus size={14} strokeWidth={1.5} aria-hidden /> Add statistic</button>}>
+          <fieldset disabled={disabled}>
+            <p className="mb-3 text-sm text-muted">Add your own figures, such as “Reviewers worldwide” or “Institutions represented”. They appear in the lists below, where you can show, hide and reorder them. Only enter figures you can verify.</p>
+            {cfg.customStats.length === 0 && <p className="rounded-md border border-dashed border-line p-3 text-center text-sm text-muted">No custom statistics yet. Add one to show another figure on the website.</p>}
+            <ul className="space-y-3">
+              {cfg.customStats.map((x, i) => (
+                <li key={x.id} className="rounded-lg border border-line p-3">
+                  <div className="grid gap-3 sm:grid-cols-[1fr_140px_110px_auto] sm:items-start">
+                    <FormField label="Statistic name" error={errors[`customStats.${i}.label`]}>{(a) => <input {...a} className="input" placeholder="Reviewers worldwide" value={x.label} onChange={(e) => setCustom(x.id, { label: e.target.value })} />}</FormField>
+                    <FormField label="Value" error={errors[`customStats.${i}.value`]}>{(a) => <input {...a} className="input" placeholder="1,240" value={x.value} onChange={(e) => setCustom(x.id, { value: e.target.value })} />}</FormField>
+                    <FormField label="Unit (optional)" error={errors[`customStats.${i}.unit`]}>{(a) => <input {...a} className="input" placeholder="days, %" value={x.unit} onChange={(e) => setCustom(x.id, { unit: e.target.value })} />}</FormField>
+                    <button type="button" className="btn-ghost h-9 text-red-600 sm:mt-5" aria-label={`Delete ${x.label || 'statistic'}`} onClick={() => set((c) => ({ ...c, customStats: c.customStats.filter((y) => y.id !== x.id) }))}><Trash2 size={14} strokeWidth={1.5} aria-hidden /> Delete</button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </fieldset>
+        </SectionCard>
+
         <SectionCard title="System figures (calculated)" action={<span className="inline-flex items-center gap-1 text-xs text-muted"><Lock size={12} aria-hidden /> Read-only</span>}>
           <dl className="grid gap-3 sm:grid-cols-2">
             {SYSTEM_STATS.map((s) => {
@@ -199,20 +268,33 @@ function MetricsEditor({ journal, saved, draft, system, onDraft }: {
           </div>
         </SectionCard>
 
-        <SectionCard title="Indexing logos">
-          <p className="mb-3 text-sm text-muted">Only mark a service as Indexed once it has confirmed the listing. Provide a link so readers can verify it.</p>
+        <SectionCard title="Indexing logos" action={<button type="button" className="btn-secondary h-8" disabled={disabled} onClick={addLogo}><Plus size={14} strokeWidth={1.5} aria-hidden /> Add logo</button>}>
+          <p className="mb-3 text-sm text-muted">Only mark a service as Indexed once it has confirmed the listing. Provide a link so readers can verify it. You can rename, add or delete services, and upload each logo image.</p>
+          {cfg.logos.length === 0 && <p className="rounded-md border border-dashed border-line p-3 text-center text-sm text-muted">No indexing services listed. Add one to show its logo on the website.</p>}
           <ul className="space-y-2">
             {cfg.logos.map((l, i) => (
-              <li key={l.id} className="grid items-center gap-2 rounded-lg border border-line p-2.5 md:grid-cols-[130px_150px_1fr_auto]">
-                <p className="text-sm font-medium">{l.name}</p>
-                <select aria-label={`${l.name} listing status`} className="input !h-9" disabled={disabled} value={l.status} onChange={(e) => setLogo(l.id, { status: e.target.value as ListingStatus })}>
-                  {(Object.keys(LISTING_LABEL) as ListingStatus[]).map((s) => <option key={s} value={s}>{LISTING_LABEL[s]}</option>)}
-                </select>
-                <div>
-                  <input aria-label={`${l.name} verify URL`} aria-invalid={!!errors[`logos.${i}.verifyUrl`]} className="input !h-9" type="url" inputMode="url" placeholder="Verify URL, https://" disabled={disabled} value={l.verifyUrl} onChange={(e) => setLogo(l.id, { verifyUrl: e.target.value })} />
-                  {errors[`logos.${i}.verifyUrl`] && <p role="alert" className="mt-0.5 text-xs text-red-600">{errors[`logos.${i}.verifyUrl`]}</p>}
+              <li key={l.id} className="rounded-lg border border-line p-2.5">
+                <div className="grid items-start gap-2 md:grid-cols-[48px_minmax(0,1fr)_150px]">
+                  <label className="relative flex h-12 w-12 cursor-pointer items-center justify-center overflow-hidden rounded-md border border-dashed border-line bg-subtle text-faint hover:border-accent" title={l.image ? `Replace ${l.image.name}` : 'Upload logo image'}>
+                    {l.image?.data ? <img src={l.image.data} alt={`${l.name || 'Service'} logo`} className="h-full w-full object-contain" /> : <ImagePlus size={18} strokeWidth={1.5} aria-hidden />}
+                    <input type="file" accept="image/png,image/jpeg,image/webp" className="sr-only" disabled={disabled} aria-label={`Upload ${l.name || 'service'} logo image`} onChange={(e) => { void pickLogoImage(l.id, e.target.files?.[0]); e.target.value = '' }} />
+                  </label>
+                  <div>
+                    <input aria-label="Service name" aria-invalid={!!errors[`logos.${i}.name`]} className="input !h-9 font-medium" placeholder="Service name, e.g. Google Scholar" disabled={disabled} value={l.name} onChange={(e) => setLogo(l.id, { name: e.target.value })} />
+                    {errors[`logos.${i}.name`] && <p role="alert" className="mt-0.5 text-xs text-red-600">{errors[`logos.${i}.name`]}</p>}
+                  </div>
+                  <select aria-label={`${l.name || 'Service'} listing status`} className="input !h-9" disabled={disabled} value={l.status} onChange={(e) => setLogo(l.id, { status: e.target.value as ListingStatus })}>
+                    {(Object.keys(LISTING_LABEL) as ListingStatus[]).map((st) => <option key={st} value={st}>{LISTING_LABEL[st]}</option>)}
+                  </select>
                 </div>
-                <Switch label={`Show ${l.name} logo`} checked={l.show} disabled={disabled} onChange={(show) => setLogo(l.id, { show })} />
+                <div className="mt-2 grid items-center gap-2 md:grid-cols-[minmax(0,1fr)_auto_auto]">
+                  <div>
+                    <input aria-label={`${l.name || 'Service'} verify URL`} aria-invalid={!!errors[`logos.${i}.verifyUrl`]} className="input !h-9" type="url" inputMode="url" placeholder="Verify URL, https://" disabled={disabled} value={l.verifyUrl} onChange={(e) => setLogo(l.id, { verifyUrl: e.target.value })} />
+                    {errors[`logos.${i}.verifyUrl`] && <p role="alert" className="mt-0.5 text-xs text-red-600">{errors[`logos.${i}.verifyUrl`]}</p>}
+                  </div>
+                  <Switch label={`Show ${l.name || 'service'} logo`} checked={l.show} disabled={disabled} onChange={(show) => setLogo(l.id, { show })} />
+                  <button type="button" className="btn-ghost h-8 text-red-600" disabled={disabled} aria-label={`Delete ${l.name || 'indexing logo'}`} onClick={() => set((c) => ({ ...c, logos: c.logos.filter((x) => x.id !== l.id) }))}><Trash2 size={14} strokeWidth={1.5} aria-hidden /> Delete</button>
+                </div>
               </li>
             ))}
           </ul>

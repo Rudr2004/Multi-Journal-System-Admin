@@ -23,6 +23,7 @@ import { formatDate } from '@/shared/formatters'
 import { journalByCode } from '@/mock/data/core'
 import type { JournalCode } from '@/shared/types'
 import { fromMonthValue, IssueStatusBadge } from './parts'
+import { DurationField } from './fields'
 
 export function IssuesPage() {
   const journals = useScopeJournals()
@@ -102,6 +103,10 @@ const schema = z.object({
   month: z.string().regex(/^\d{4}-\d{2}$/, 'Choose the issue month'),
   submissionDeadline: z.string().min(1, 'Set a submission deadline'),
   publicationDate: z.string().min(1, 'Set a publication date'),
+  firstReviewValue: z.number({ error: 'Enter a number' }).min(1, 'Enter 1 or more').max(999, 'Too large'),
+  firstReviewUnit: z.enum(['hours', 'days']),
+  publicationValue: z.number({ error: 'Enter a number' }).min(1, 'Enter 1 or more').max(999, 'Too large'),
+  publicationUnit: z.enum(['hours', 'days']),
 }).refine((v) => !v.submissionDeadline || !v.publicationDate || v.submissionDeadline <= v.publicationDate, { path: ['publicationDate'], message: 'Publication date must be on or after the submission deadline' })
 
 function NewIssueDialog({ open, onClose, journals }: { open: boolean; onClose: () => void; journals: JournalCode[] }) {
@@ -122,7 +127,7 @@ function NewIssueForm({ journals, onDone }: { journals: JournalCode[]; onDone: (
   const number0 = Math.max(0, ...mine.filter((i) => i.volume === volume0).map((i) => i.number)) + 1
   const { register, handleSubmit, watch, setError, formState: { errors } } = useForm({
     resolver: zodResolver(schema),
-    defaultValues: { journal: j0 ?? '', volume: volume0, number: number0, month: '', submissionDeadline: '', publicationDate: '' },
+    defaultValues: { journal: j0 ?? '', volume: volume0, number: number0, month: '', submissionDeadline: '', publicationDate: '', firstReviewValue: 2, firstReviewUnit: 'days' as const, publicationValue: 15, publicationUnit: 'days' as const },
   })
   const j = watch('journal') as JournalCode
 
@@ -132,6 +137,7 @@ function NewIssueForm({ journals, onDone }: { journals: JournalCode[]; onDone: (
       const issue = await createIssue({
         journal: v.journal as JournalCode, volume: v.volume, number: v.number, month: fromMonthValue(v.month),
         submissionDeadline: v.submissionDeadline, publicationDate: v.publicationDate,
+        firstReviewTime: { value: v.firstReviewValue, unit: v.firstReviewUnit }, publicationTime: { value: v.publicationValue, unit: v.publicationUnit },
         callForPapers: 'We invite original research articles, reviews and case studies. All submissions are peer reviewed and receive a DOI on publication.',
       })
       toast.success(`${issue.label} created as a draft`)
@@ -162,6 +168,10 @@ function NewIssueForm({ journals, onDone }: { journals: JournalCode[]; onDone: (
       <FormField label="Publication date" required error={errors.publicationDate?.message}>
         {(a) => <input {...a} type="date" className="input" {...register('publicationDate')} />}
       </FormField>
+      <DurationField label="First review" error={errors.firstReviewValue?.message} hint="Time to the first review decision, e.g. 2 days or 36 hours."
+        valueProps={register('firstReviewValue', { valueAsNumber: true })} unitProps={register('firstReviewUnit')} />
+      <DurationField label="Publication" error={errors.publicationValue?.message} hint="Time from acceptance to publication, e.g. 15 days."
+        valueProps={register('publicationValue', { valueAsNumber: true })} unitProps={register('publicationUnit')} />
     </form>
   )
 }

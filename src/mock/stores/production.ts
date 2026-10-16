@@ -5,7 +5,7 @@ import { buildPapers } from '../data/papers'
 import { generatedAuthors } from '../data/authors'
 import { registerReset } from '../reset'
 import { useDataStore } from '../store'
-import { seedBackdated, seedChangeRequests, type BackdatedItem, type ChangeRequest, type ProductionRecord } from '../data/production'
+import { seedBackdated, seedChangeRequests, type BackdatedItem, type BackdatedSubmission, type ChangeRequest, type ProductionRecord } from '../data/production'
 
 interface ProductionState {
   /** Production workspace records, created lazily per paper. */
@@ -13,6 +13,8 @@ interface ProductionState {
   /** Next backdated sequence number per journal (starts at 100). */
   backdatedSeq: Record<JournalCode, number>
   backdated: BackdatedItem[]
+  /** Form data saved by the Editor for backdated articles, keyed by the article's current Paper ID. */
+  backdatedSubmissions: Record<string, BackdatedSubmission>
   changeRequests: ChangeRequest[]
   reset: () => void
   patch: (p: Partial<Omit<ProductionState, 'reset' | 'patch'>>) => void
@@ -37,6 +39,7 @@ function seed() {
     records: {} as Record<string, ProductionRecord>,
     backdatedSeq: seq,
     backdated,
+    backdatedSubmissions: {} as Record<string, BackdatedSubmission>,
     changeRequests: seedChangeRequests(buildPapers(), generatedAuthors),
   }
 }

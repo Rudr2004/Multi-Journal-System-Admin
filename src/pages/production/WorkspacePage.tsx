@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { AlertOctagon, ArrowRight, CheckCircle2, ExternalLink, Newspaper, Play, Send } from 'lucide-react'
+import { AlertOctagon, ArrowRight, CheckCircle2, Eye, ExternalLink, Newspaper, Play, Send } from 'lucide-react'
 import { PageHeader } from '@/layout/PageHeader'
 import { AutosaveIndicator } from '@/components/Autosave'
 import { Badge, JournalBadge, StatusBadge } from '@/components/Badges'
@@ -25,9 +25,13 @@ import { ManuscriptPane } from './workspace/ManuscriptPane'
 import { ArticleEditor } from './workspace/ArticleEditor'
 import { MetadataChecklist, type Draft } from './workspace/MetadataChecklist'
 import { SeoPanel } from './workspace/SeoPanel'
+import { EditorNotesBanner } from '@/pages/editorial/EditorNotes'
 import { CertificatesPanel, FinalFilePanel } from './workspace/FilesCertificates'
+import { TemplateCard } from './TemplateDownload'
+import { CitePanel } from './workspace/CitePanel'
+import { DraftPreview } from './DraftPreview'
 
-const toDraft = (r: ProductionRecord): Draft => ({ title: r.title, authors: r.authors, abstract: r.abstract, keywords: r.keywords, references: r.references, blocks: r.blocks, seo: r.seo, returnAcknowledged: r.returnAcknowledged })
+const toDraft = (r: ProductionRecord): Draft => ({ title: r.title, authors: r.authors, abstract: r.abstract, keywords: r.keywords, references: r.references, blocks: r.blocks, seo: r.seo, returnAcknowledged: r.returnAcknowledged, citeInPrint: r.citeInPrint ?? false })
 
 export function WorkspacePage() {
   const { paperId = '' } = useParams()
@@ -68,6 +72,17 @@ function Workspace({ initial, paperId }: { initial: ProductionRecord; paperId: s
   const [version, setVersion] = useState(0)
   const [busy, setBusy] = useState<string | null>(null)
   const [tab, setTab] = useState('article')
+  const [previewing, setPreviewing] = useState(false)
+  const [metaFocus, setMetaFocus] = useState<{ key?: string; n: number }>({ n: 0 })
+  /** Jump from an outstanding item to the tab where it is fixed. */
+  const goToItem = (m: string) => {
+    const key = (['title', 'authors', 'affiliations', 'abstract', 'keywords', 'references'] as const).find((k) => m.toLowerCase().startsWith(k))
+    if (key) { setMetaFocus((f) => ({ key, n: f.n + 1 })); setTab('meta') }
+    else if (/^(seo|slug)/i.test(m)) setTab('seo')
+    else if (/^final paper/i.test(m)) setTab('file')
+    else if (/^certificates/i.test(m)) setTab('certs')
+    else window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
   const draftRef = useRef(draft)
   useEffect(() => { draftRef.current = draft })
 
@@ -144,6 +159,7 @@ function Workspace({ initial, paperId }: { initial: ProductionRecord; paperId: s
   const actions = (
     <>
       <AutosaveIndicator watch={version} />
+      <button type="button" className="btn-secondary" onClick={() => setPreviewing(true)}><Eye size={15} aria-hidden /> View draft</button>
       {status === 'paid' && (
         <GuardedButton className="btn-primary" allowed={canAct} why={perm.why('work') ?? 'Only the assigned Associate Editor can start production.'} disabled={busy === 'start'} onClick={onStart}>
           <Play size={15} aria-hidden /> Start production
@@ -165,11 +181,14 @@ function Workspace({ initial, paperId }: { initial: ProductionRecord; paperId: s
         <JournalBadge code={paper.journal} />
         <StatusBadge status={paper.status} />
         {(status === 'in_production' || status === 'returned_to_production' || status === 'ready_for_approval') && <Badge tone="info"><Newspaper size={12} aria-hidden /> In Press</Badge>}
-        {status !== 'ready_for_approval' && <span className="inline-flex items-center gap-1.5 text-muted">Due <DueChip value={dueOf(paper)} /></span>}
+        {status !== 'ready_for_approval' && <span className="inline-flex items-center gap-1.5 text-muted">Due <DueChip value={dueOf(paper)} showDate /></span>}
         <span className="text-muted">Assignee: <span className="text-ink">{users.find((u) => u.id === assigneeId)?.name ?? 'Unassigned'}</span></span>
         <span className="text-muted">DOI: <span className="font-mono text-xs text-ink">{doiFor(paper.id)}</span></span>
         <Link to={`/submissions/${paper.id}`} className="inline-flex items-center gap-1 text-accent hover:underline">Submission record <ExternalLink size={12} aria-hidden /></Link>
       </div>
+
+      <EditorNotesBanner paperId={paper.id} />
+      <TemplateCard journal={paper.journal} />
 
       {returned && (
         <div role="alert" className="mb-5 rounded-lg border border-red-200 bg-red-50 p-4">
@@ -220,8 +239,14 @@ function Workspace({ initial, paperId }: { initial: ProductionRecord; paperId: s
             </div>
           ),
         },
-        { id: 'meta', label: 'Metadata checklist', badge: openChecks || undefined, content: <MetadataChecklist items={checks} draft={draft} update={update} readOnly={!editable} /> },
-        { id: 'seo', label: 'SEO & URL', content: <SeoPanel draft={draft} update={update} readOnly={!editable} journal={paper.journal} paperId={paper.id} /> },
+        { id: 'meta', label: 'Metadata checklist', badge: openChecks || undefined, content: (
+          <div className="grid gap-4 lg:grid-cols-2 lg:items-start lg:[&>section]:sticky lg:[&>section]:top-4 lg:[&>section]:h-[720px]">
+            <MetadataChecklist key={metaFocus.n} initialOpen={metaFocus.key} items={checks} draft={draft} update={update} readOnly={!editable} original={record.manuscript} />
+            <ManuscriptPane record={record} />
+          </div>
+        ) },
+        { id: 'seo', label: 'SEO & URL', content: <SeoPanel draft={draft} update={update} readOnly={!editable} journal={paper.journal} paperId={paper.id} originalAbstract={record.manuscript.abstract} /> },
+        { id: 'cite', label: 'Cite this article', badge: draft.citeInPrint ? undefined : 'Optional', content: <CitePanel journal={paper.journal} paperId={paper.id} draft={draft} update={update} readOnly={!editable} onGoToFile={() => setTab('file')} /> },
         { id: 'file', label: 'Final file', badge: record.finalFile ? undefined : '!', content: <FinalFilePanel record={record} readOnly={!editable} busy={busy === 'upload'} onUpload={onUpload} /> },
         {
           id: 'certs', label: 'Certificates', badge: record.certificates.length ? record.certificates.length : '!', content: (
@@ -231,6 +256,8 @@ function Workspace({ initial, paperId }: { initial: ProductionRecord; paperId: s
         { id: 'history', label: 'Activity', content: <SectionCard title="Paper timeline"><Timeline items={paperEvents} empty="No production activity recorded yet." /></SectionCard> },
       ]} />
 
+      <DraftPreview open={previewing} onClose={() => setPreviewing(false)} record={merged} journal={paper.journal} paperId={paper.id} articleType={paper.articleType} />
+
       {(status === 'in_production' || status === 'returned_to_production') && (
         <section aria-label="Send readiness" className="mt-6 card p-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -238,7 +265,7 @@ function Workspace({ initial, paperId }: { initial: ProductionRecord; paperId: s
             {ready.ready ? <Badge tone="success">All required items complete</Badge> : <Badge tone="warning">{ready.missing.length} item(s) outstanding</Badge>}
           </div>
           {ready.missing.length > 0 && (
-            <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-muted">{ready.missing.map((m) => <li key={m}>{m}</li>)}</ul>
+            <ul className="mt-3 space-y-1 text-sm">{ready.missing.map((m) => <li key={m}><button type="button" onClick={() => goToItem(m)} className="group flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left hover:bg-subtle"><ArrowRight size={14} className="mt-1 shrink-0 text-accent" aria-hidden /><span className="text-muted group-hover:text-ink group-hover:underline">{m}</span></button></li>)}</ul>
           )}
         </section>
       )}
