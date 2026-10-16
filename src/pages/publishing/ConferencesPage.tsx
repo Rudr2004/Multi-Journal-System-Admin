@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { Plus, Presentation } from 'lucide-react'
+import { Pencil, Plus, Presentation } from 'lucide-react'
 import { PageHeader } from '@/layout/PageHeader'
 import { DataTable, SelectFilter, type Column } from '@/components/DataTable'
 import { Badge, JournalBadge } from '@/components/Badges'
@@ -52,6 +52,9 @@ function ConferencesManager() {
     { id: 'linked', header: 'Submissions', align: 'right', sort: (c) => c.linkedCount, cell: (c) => <span className="tabular-nums">{c.linkedCount}</span> },
     { id: 'apc', header: 'APC', cell: (c) => (c.apc ? <span className="whitespace-nowrap">{formatMoney(c.apc.amount, c.apc.currency)}</span> : <span className="text-muted">None</span>) },
     { id: 'status', header: 'Status', cell: (c) => { const s = conferenceStatus(c, c.issue); return <Badge tone={s.tone}>{s.label}</Badge> } },
+    { id: 'actions', header: 'Actions', locked: true, align: 'right', cell: (c) => (
+      <Link to={`/conferences/${c.id}`} className="btn-secondary !h-8 whitespace-nowrap" aria-label={`Edit ${c.shortName}`}><Pencil size={14} strokeWidth={1.5} aria-hidden /> Edit</Link>
+    ) },
   ]
 
   return (
@@ -70,7 +73,7 @@ function ConferencesManager() {
 
 function NewConferenceDialog({ open, onClose, journals }: { open: boolean; onClose: () => void; journals: ReturnType<typeof useScopeJournals> }) {
   return (
-    <Dialog open={open} onClose={onClose} width={720} title="New conference" description="Add the essentials now; logos and linked submissions can be added on the conference page."
+    <Dialog open={open} onClose={onClose} width={720} title="New conference" description="Add the essentials now; key members, files, photos and linked submissions can be added on the conference page."
       footer={<><button className="btn-secondary" type="button" onClick={onClose}>Cancel</button><button className="btn-primary" type="submit" form="new-conf-form">Create conference</button></>}>
       <NewConferenceForm journals={journals} onDone={onClose} />
     </Dialog>
@@ -82,7 +85,7 @@ function NewConferenceForm({ journals, onDone }: { journals: ReturnType<typeof u
   const { register, handleSubmit, watch, setValue, formState: { errors } } = useForm({ resolver: zodResolver(conferenceSchema), defaultValues: toFormValues(undefined, journals[0]) })
   const submit = handleSubmit(async (v) => {
     try {
-      const c = await createConference(toInput(v, {}))
+      const c = await createConference(toInput(v))
       toast.success(`${c.shortName} created`)
       onDone()
       navigate(`/conferences/${c.id}`)

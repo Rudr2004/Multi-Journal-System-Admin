@@ -24,7 +24,8 @@ export interface CreditNote {
 
 /* ---------- Referral credits ---------- */
 export type ReferralStatus = 'pending' | 'eligible' | 'paid' | 'cancelled'
-export type PayoutMode = 'bank_transfer' | 'upi' | 'cheque' | 'other'
+export type PayoutMode = 'bank_transfer' | 'upi' | 'cheque' | 'other' | 'gateway'
+export type PayoutPaymentStatus = 'processing' | 'paid' | 'failed'
 
 export interface ReferralPayout {
   date: string // ISO date
@@ -34,6 +35,34 @@ export interface ReferralPayout {
   recordedBy: string
   /** Proof of payment (mock upload: only the file name and size are kept). */
   proof?: { name: string; size: number }
+  /** Payment status of this payout. Older records without it count as paid. */
+  status?: PayoutPaymentStatus
+  /** Gateway transaction id, or the bank/UTR reference for manual payouts. */
+  transactionId?: string
+  /** When the referee was emailed: the proof of payment (manual) or a confirmation (gateway). */
+  emailSentAt?: string
+  emailKind?: 'proof' | 'confirmation'
+}
+
+/** Contact and payment details of a referee, kept per email address. */
+export interface ReferrerProfile {
+  phone?: string
+  upiId?: string
+  updatedAt?: string
+  updatedBy?: string
+}
+
+/** Default referral credit per journal (INR). Editable in Referral Management. */
+export const DEFAULT_REFERRAL_AMOUNTS: Record<JournalCode, number> = { IJMAT: 250, JIMRT: 250, IJCSD: 300, IJECM: 250, IJFRD: 150 }
+
+export const REFERRER_PROFILES: Record<string, ReferrerProfile> = {
+  'sunita.deshpande@coep.example': { phone: '+91 98230 41187', upiId: 'sunita.deshpande@okhdfcbank' },
+  'manoj.tiwari@nitrkl.example': { phone: '+91 94370 22610', upiId: 'manojtiwari@oksbi' },
+  'harsh.vora@gtu.example': { phone: '+91 98795 11042', upiId: 'harshvora@ybl' },
+  'fatima.sheikh@amu.example': { phone: '+91 91456 70338' },
+  'anita.chaudhary@kjsce.example': { phone: '+91 98200 66419', upiId: 'anita.c@icici' },
+  'rajiv.menon@cusat.example': { phone: '+91 94470 53921', upiId: 'rajivmenon@paytm' },
+  'pallavi.kulkarni@viit.example': { phone: '+91 98909 37754', upiId: 'pallavik@okaxis' },
 }
 
 export interface ReferralCredit {
@@ -54,7 +83,7 @@ export interface ReferralCredit {
 }
 
 export const PAYOUT_MODE_LABEL: Record<PayoutMode, string> = {
-  bank_transfer: 'Bank transfer', upi: 'UPI', cheque: 'Cheque', other: 'Other',
+  bank_transfer: 'Bank transfer', upi: 'UPI', cheque: 'Cheque', other: 'Other', gateway: 'Payment gateway (automatic)',
 }
 
 const REFERRERS: Pick<ReferralCredit, 'referrer' | 'referrerEmail' | 'referrerType'>[] = [
@@ -101,6 +130,7 @@ export function buildReferrals(papers: Paper[]): ReferralCredit[] {
         credit.payout = {
           date: ago(2 + k * 3).slice(0, 10), amount, mode: (['bank_transfer', 'upi', 'bank_transfer', 'cheque'] as PayoutMode[])[k % 4],
           reference: PAYOUT_REFS[k % PAYOUT_REFS.length], recordedBy: 'Priya Menon',
+          status: 'paid', transactionId: PAYOUT_REFS[k % PAYOUT_REFS.length], emailKind: 'proof', emailSentAt: ago(2 + k * 3),
           proof: { name: `payout-proof-${PAYOUT_REFS[k % PAYOUT_REFS.length].replace(/[^A-Za-z0-9]/g, '')}.pdf`, size: 118_000 + k * 7_300 },
         }
       }

@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import type { ActivityEntry, Author, AuditEntry, DoiDeposit, Issue, JournalScope, MessageLogEntry, Paper, PaperEvent, Payment, StaffUser, Ticket, WhatsAppChat } from '@/shared/types'
+import type { ActivityEntry, Author, AuditEntry, DoiDeposit, Issue, JournalCode, JournalScope, MessageLogEntry, Paper, PaperEvent, Payment, StaffUser, Ticket, WhatsAppChat } from '@/shared/types'
 import { DEFAULT_FLAGS, type FeatureFlags } from '@/permissions/features'
 import { JOURNAL_CODES, SEED_USERS } from './data/core'
 import { buildIssues, buildPayments } from './data/finance'
@@ -24,12 +24,32 @@ interface DataState {
   deposits: DoiDeposit[]
   /** Edited author lists (e.g. post-publication name corrections), by Paper ID. */
   authorsOverride: Record<string, Author[]>
+  /** Per journal: assign paid articles to an Associate Editor automatically. */
+  autoAssignAe: Record<JournalCode, boolean>
   reset: () => void
   patch: (p: Partial<Omit<DataState, 'reset' | 'patch'>>) => void
 }
 
+/**
+ * Changes made to a paper (status, assignee, reviewer…) are remembered in the browser, so a paper keeps the status an
+ * authorised person gave it when it is reopened or the page is reloaded. "Reset demo data" clears them.
+ */
+const OVERRIDES_KEY = 'journal-admin-paper-overrides'
+export const loadPaperOverrides = (): Record<string, Partial<Paper>> => {
+  try { return JSON.parse(localStorage.getItem(OVERRIDES_KEY) ?? '{}') as Record<string, Partial<Paper>> } catch { return {} }
+}
+export const savePaperOverride = (id: string, patch: Partial<Paper>) => {
+  try {
+    const all = loadPaperOverrides()
+    all[id] = { ...all[id], ...patch }
+    localStorage.setItem(OVERRIDES_KEY, JSON.stringify(all))
+  } catch { /* storage may be unavailable; the change still applies for this session */ }
+}
+const clearPaperOverrides = () => { try { localStorage.removeItem(OVERRIDES_KEY) } catch { /* ignore */ } }
+
 function seed() {
-  const papers = buildPapers()
+  const overrides = loadPaperOverrides()
+  const papers = buildPapers().map((p) => (overrides[p.id] ? { ...p, ...overrides[p.id] } : p))
   return {
     users: structuredClone(SEED_USERS),
     papers,
@@ -43,12 +63,13 @@ function seed() {
     audit: [] as AuditEntry[],
     deposits: buildDeposits(papers),
     authorsOverride: {} as Record<string, Author[]>,
+    autoAssignAe: Object.fromEntries(JOURNAL_CODES.map((c) => [c, true])) as Record<JournalCode, boolean>,
   }
 }
 
 export const useDataStore = create<DataState>((set) => ({
   ...seed(),
-  reset: () => set(seed()),
+  reset: () => { clearPaperOverrides(); set(seed()) },
   patch: (p) => set(p),
 }))
 

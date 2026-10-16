@@ -19,12 +19,13 @@ import { useAsync } from '@/lib/useAsync'
 import { useUnsavedChanges } from '@/lib/useUnsavedChanges'
 import { cn } from '@/lib/utils'
 import { usePermission } from '@/permissions/hooks'
-import { advanceIssue, getIssue, publishIssue, saveIssue, type IssueDetail } from '@/mock/api/issues'
+import { ISSUE_FILE_LABEL, advanceIssue, getIssue, publishIssue, saveIssue, saveIssueFile, type IssueDetail } from '@/mock/api/issues'
 import { ISSUE_FLOW, ISSUE_STATUS_META } from '@/mock/data/publishing'
 import { journalByCode } from '@/mock/data/core'
 import { formatDate } from '@/shared/formatters'
-import type { Paper } from '@/shared/types'
+import type { FileRef, Issue, IssueFileKey, Paper } from '@/shared/types'
 import { ImageField, fromMonthValue, toMonthValue, type ImageValue } from './parts'
+import { DOC_ACCEPT, DurationField, FileField } from './fields'
 
 const PAGE_RE = /^\d{1,4}([–-]\d{1,4})?$/
 const normPages = (v: string) => v.trim().replace(/\s*-\s*/, '–')
@@ -42,6 +43,10 @@ const schema = z.object({
   submissionDeadline: z.string().min(1, 'Set a submission deadline'),
   publicationDate: z.string().min(1, 'Set a publication date'),
   callForPapers: z.string().trim().min(20, 'Call for papers needs at least 20 characters').max(600, 'Keep it to 600 characters or fewer'),
+  firstReviewValue: z.number({ error: 'Enter a number' }).min(1, 'Enter 1 or more').max(999, 'Too large'),
+  firstReviewUnit: z.enum(['hours', 'days']),
+  publicationValue: z.number({ error: 'Enter a number' }).min(1, 'Enter 1 or more').max(999, 'Too large'),
+  publicationUnit: z.enum(['hours', 'days']),
 }).refine((v) => v.submissionDeadline <= v.publicationDate, { path: ['publicationDate'], message: 'Publication date must be on or after the submission deadline' })
 
 export function IssueEditorPage() {
@@ -70,7 +75,9 @@ function IssueEditor({ detail, reload }: { detail: IssueDetail; reload: () => vo
   const locked = issue.status === 'published' || !perm.can('manage')
   const jn = journalByCode(issue.journal)
 
-  const initialForm = { number: issue.number, month: toMonthValue(issue.month), submissionDeadline: issue.submissionDeadline, publicationDate: issue.publicationDate, callForPapers: issue.callForPapers }
+  const initialForm = { number: issue.number, month: toMonthValue(issue.month), submissionDeadline: issue.submissionDeadline, publicationDate: issue.publicationDate, callForPapers: issue.callForPapers,
+    firstReviewValue: issue.firstReviewTime?.value ?? 2, firstReviewUnit: issue.firstReviewTime?.unit ?? ('days' as const),
+    publicationValue: issue.publicationTime?.value ?? 15, publicationUnit: issue.publicationTime?.unit ?? ('days' as const) }
   const { register, handleSubmit, watch, reset, formState: { errors, isDirty, isSubmitting } } = useForm({ resolver: zodResolver(schema), defaultValues: initialForm })
 
   const [articles, setArticles] = useState<Paper[]>(detail.articles)
@@ -126,7 +133,11 @@ function IssueEditor({ detail, reload }: { detail: IssueDetail; reload: () => vo
     if (Object.keys(errs).length) { toast.error('Fix the highlighted page numbers before saving.'); return false }
     const cleanPages = Object.fromEntries(articles.map((a) => [a.id, normPages(pages[a.id] ?? '')]))
     try {
-      await saveIssue(issue.id, { ...v, month: fromMonthValue(v.month), articleIds: ids, pages: cleanPages, cover })
+      await saveIssue(issue.id, {
+        number: v.number, month: fromMonthValue(v.month), submissionDeadline: v.submissionDeadline, publicationDate: v.publicationDate, callForPapers: v.callForPapers,
+        firstReviewTime: { value: v.firstReviewValue, unit: v.firstReviewUnit }, publicationTime: { value: v.publicationValue, unit: v.publicationUnit },
+        articleIds: ids, pages: cleanPages, cover,
+      })
       setPages(cleanPages)
       reset(v)
       setBase({ ids, pages: cleanPages, cover })
@@ -198,7 +209,7 @@ function IssueEditor({ detail, reload }: { detail: IssueDetail; reload: () => vo
         <div role="status" className="mb-5 flex items-start gap-2 rounded-lg border border-line bg-subtle px-4 py-3 text-sm text-muted">
           <Lock size={16} strokeWidth={1.5} className="mt-0.5 shrink-0" aria-hidden />
           {issue.status === 'published'
-            ? <span>This issue was published{issue.actualOnlineDate ? ` on ${formatDate(issue.actualOnlineDate)}` : ''} and is locked. Corrections to published articles go through Post-publication changes.</span>
+            ? <span>This issue was published with the publication date {formatDate(issue.publicationDate)} and its details are locked. You can still upload or replace the PDFs under Issue downloads. Corrections to published articles go through Post Corrections.</span>
             : <span>{perm.why('manage')}</span>}
         </div>
       )}
@@ -222,6 +233,10 @@ function IssueEditor({ detail, reload }: { detail: IssueDetail; reload: () => vo
                 <FormField label="Publication date" required error={errors.publicationDate?.message}>
                   {(a) => <input {...a} type="date" className="input" {...register('publicationDate')} />}
                 </FormField>
+                <DurationField label="First review" error={errors.firstReviewValue?.message} hint="Time to the first review decision, e.g. 2 days or 36 hours."
+                  valueProps={register('firstReviewValue', { valueAsNumber: true })} unitProps={register('firstReviewUnit')} />
+                <DurationField label="Publication" error={errors.publicationValue?.message} hint="Time from acceptance to publication, e.g. 15 days."
+                  valueProps={register('publicationValue', { valueAsNumber: true })} unitProps={register('publicationUnit')} />
                 <div className="sm:col-span-2">
                   <ImageField label="Cover image" value={cover} onChange={setCover} disabled={locked} hint="Placeholder upload — shown on the issue page. PNG, JPG or WebP up to 2 MB." />
                 </div>
@@ -237,6 +252,7 @@ function IssueEditor({ detail, reload }: { detail: IssueDetail; reload: () => vo
               <button type="submit" className="sr-only" tabIndex={-1}>Save</button>
             </form>
           </SectionCard>
+          <div className="mt-5"><IssueFilesCard issue={issue} canEdit={perm.can('manage')} onSaved={reload} /></div>
         </div>
 
         <div className="space-y-5 lg:col-span-3">
@@ -327,5 +343,42 @@ function ArticleRow({ paper, index, locked, pages, error, onPages, onBlur, onRem
       </div>
       {!locked && <button className="btn-ghost mt-5 !h-8 !w-8 !px-0" onClick={onRemove} aria-label={`Remove ${paper.id} from this issue`}><X size={16} strokeWidth={1.5} /></button>}
     </li>
+  )
+}
+
+const FILE_KEYS: { key: IssueFileKey; hint: string }[] = [
+  { key: 'fullIssue', hint: 'The complete issue as one PDF, shown as "Download Full Issue". Created after the issue closes.' },
+  { key: 'indexPage', hint: 'Table of contents / index page, shown as "Download Index Page".' },
+  { key: 'coverPage', hint: 'Cover page PDF, shown as "Download Cover Page".' },
+  { key: 'manuscriptTemplate', hint: 'The manuscript template listed under Author Downloads on the website.' },
+]
+
+/** Downloadable PDFs for the issue. Saved immediately and editable even after the issue is published. */
+function IssueFilesCard({ issue, canEdit, onSaved }: { issue: Issue; canEdit: boolean; onSaved: () => void }) {
+  const [busy, setBusy] = useState<IssueFileKey | null>(null)
+  const update = async (key: IssueFileKey, file: FileRef | null) => {
+    setBusy(key)
+    try {
+      await saveIssueFile(issue.id, key, file)
+      toast.success(file ? `${ISSUE_FILE_LABEL[key]} saved` : `${ISSUE_FILE_LABEL[key]} removed`)
+      onSaved()
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setBusy(null)
+    }
+  }
+  return (
+    <SectionCard title="Issue downloads">
+      <p className="mb-3 text-sm text-muted">
+        Upload the PDFs readers can download from the issue page. These stay editable after the issue is published, because the full issue and the index page are only produced once the issue has closed. Changes are saved as soon as you upload.
+      </p>
+      <div className="space-y-3">
+        {FILE_KEYS.map(({ key, hint }) => (
+          <FileField key={key} label={ISSUE_FILE_LABEL[key]} hint={issue.files?.[key] ? undefined : hint} value={issue.files?.[key]} disabled={!canEdit} busy={busy === key}
+            onChange={(f) => update(key, f)} {...(key === 'manuscriptTemplate' ? { ...DOC_ACCEPT, accept: /\.(pdf|docx?)$|application\/pdf|msword|wordprocessingml/i, acceptAttr: '.pdf,.doc,.docx', what: 'a PDF, DOC or DOCX file' } : {})} />
+        ))}
+      </div>
+    </SectionCard>
   )
 }

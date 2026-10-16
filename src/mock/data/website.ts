@@ -151,6 +151,12 @@ export interface BoardMember {
   orcid: string
   scholar: string
   scopus: string
+  researchgate?: string
+  linkedin?: string
+  /** Personal portfolio / website. */
+  website?: string
+  /** Areas of expertise shown on the editorial board page. */
+  expertise?: string[]
   termStart: string // yyyy-mm-dd
   termEnd: string
   photo?: string // data URL when uploaded
@@ -209,6 +215,10 @@ export function buildBoard(): BoardMember[] {
         orcid: `0000-000${(h % 3) + 1}-${1000 + (h % 8999)}-${1000 + ((h * 7) % 8999)}`,
         scholar: `https://scholar.google.com/citations?user=${slug.replace(/-/g, '').slice(0, 6)}${h % 99}`,
         scopus: `https://www.scopus.com/authid/detail.uri?authorId=${5700000000 + h * 13}`,
+        researchgate: `https://www.researchgate.net/profile/${slug.split('-').map((w) => w[0].toUpperCase() + w.slice(1)).join('-')}`,
+        linkedin: group === 'Review Board' ? '' : `https://www.linkedin.com/in/${slug}`,
+        website: k % 3 === 0 ? `https://www.${slug.replace(/-/g, '')}.example` : '',
+        expertise: SUBJECT[j].split(',').slice(0, 3).map((x) => x.trim()),
         termStart: '2025-01-01', termEnd: '2027-12-31',
         active: !(ji === 1 && k === 10) && !(ji === 3 && k === 8),
       })
@@ -221,7 +231,8 @@ export function buildBoard(): BoardMember[] {
  * Announcements
  * ===================================================================== */
 export const ANNOUNCEMENT_TYPES = ['News', 'Call for Papers', 'Special Issue', 'Deadline Extension', 'Maintenance'] as const
-export type AnnouncementType = (typeof ANNOUNCEMENT_TYPES)[number]
+/** Free text; ANNOUNCEMENT_TYPES are only suggestions in the editor. */
+export type AnnouncementType = string
 export const PLACEMENTS = [
   { id: 'banner', label: 'Homepage banner' },
   { id: 'topbar', label: 'Top bar' },
@@ -238,6 +249,8 @@ export interface Announcement {
   channel: AnnouncementChannel
   link: string
   highlight: boolean
+  /** Optional picture shown with the notification (banner on the Notices tab, small thumbnail in the ticker). */
+  image?: { name: string; data?: string }
   /** Records created together share a batch id (multi-journal posts). */
   batchId: string
   journal: JournalCode

@@ -2,7 +2,7 @@ import { differenceInCalendarDays } from 'date-fns'
 import type { JournalCode, Paper } from '@/shared/types'
 import { hashStr, isPublished } from '../data/analytics'
 import { NOW } from '../data/papers'
-import { recordAudit, updatePaper } from '../actions'
+import { logEvent, recordAudit, sendMessage, updatePaper } from '../actions'
 import { useDataStore } from '../store'
 import { useInsightsStore, type ScholarCheck } from '../stores/insights'
 import { delay } from './latency'
@@ -13,6 +13,8 @@ export interface ScholarRow {
   journal: JournalCode
   issueId?: string
   issueLabel: string
+  volume?: number
+  issueNumber?: number
   indexed: boolean
   lastChecked: string
   /** Mock Google Scholar result page for the article (only meaningful when indexed). */
@@ -23,6 +25,8 @@ export interface ScholarIssueRow {
   issueId: string
   journal: JournalCode
   label: string
+  volume: number
+  number: number
   total: number
   indexed: number
   rate: number
@@ -57,7 +61,7 @@ export async function listScholarStatus(journals: JournalCode[]): Promise<Schola
       const indexed = c?.indexed ?? p.status === 'indexed'
       const issue = issueOf.get(p.id)
       return {
-        paperId: p.id, title: p.title, journal: p.journal, issueId: issue?.id, issueLabel: issue?.label ?? 'Not assigned to an issue',
+        paperId: p.id, title: p.title, journal: p.journal, issueId: issue?.id, issueLabel: issue?.label ?? 'Not assigned to an issue', volume: issue?.volume, issueNumber: issue?.number,
         indexed, lastChecked: c?.checkedAt ?? seededCheckedAt(p, indexed),
         resultUrl: `https://scholar.google.com/scholar?q=${encodeURIComponent(`"${p.title}"`)}`,
       }
@@ -68,7 +72,7 @@ export async function listScholarStatus(journals: JournalCode[]): Promise<Schola
     .map((i) => {
       const inIssue = rows.filter((r) => r.issueId === i.id)
       const indexed = inIssue.filter((r) => r.indexed).length
-      return { issueId: i.id, journal: i.journal, label: i.label, total: inIssue.length, indexed, rate: pct(indexed, inIssue.length) }
+      return { issueId: i.id, journal: i.journal, label: i.label, volume: i.volume, number: i.number, total: inIssue.length, indexed, rate: pct(indexed, inIssue.length) }
     })
     .filter((i) => i.total > 0)
 
@@ -80,7 +84,9 @@ export async function listScholarStatus(journals: JournalCode[]): Promise<Schola
   return { rows, issues: issueRows, journals: journalRows }
 }
 
-export interface RecheckResult { checked: number; nowIndexed: number; stillPending: number }
+export interface RecheckResult { checked: number; nowIndexed: number; stillPending: number; emailed: number }
+
+export const scholarUrl = (title: string) => `https://scholar.google.com/scholar?q=${encodeURIComponent(`"${title}"`)}`
 
 /**
  * Ask Google Scholar again. Pending articles older than 30 days usually flip to indexed;
@@ -94,6 +100,7 @@ export async function recheckScholar(paperIds: string[]): Promise<RecheckResult>
   const updates: Record<string, ScholarCheck> = {}
   let nowIndexed = 0
   let stillPending = 0
+  let emailed = 0
   for (const id of paperIds) {
     const p = papers.find((x) => x.id === id)
     if (!p) continue
@@ -106,6 +113,10 @@ export async function recheckScholar(paperIds: string[]): Promise<RecheckResult>
       nowIndexed++
       if (p.status === 'published') updatePaper(id, { status: 'indexed' }, { event: 'Google Scholar indexing confirmed' })
       recordAudit({ journal: p.journal, action: 'Google Scholar status updated', target: id, oldValue: 'Not indexed', newValue: 'Indexed' })
+      const link = scholarUrl(p.title)
+      sendMessage({ journal: p.journal, paperId: id, recipient: p.authorEmail, channel: 'email', template: `Google Scholar indexing confirmed: ${link}`, status: 'sent' })
+      logEvent(id, 'Author emailed the Google Scholar indexing link', link)
+      emailed++
     } else if (!wasIndexed) stillPending++
   }
   useInsightsStore.getState().setScholarChecks(updates)
@@ -114,5 +125,5 @@ export async function recheckScholar(paperIds: string[]): Promise<RecheckResult>
     const first = papers.find((x) => x.id === paperIds[0])
     recordAudit({ journal: first?.journal ?? 'ALL', action: 'Google Scholar recheck run', target: `${total} articles`, newValue: `${nowIndexed} newly indexed, ${stillPending} still pending` })
   }
-  return { checked: total, nowIndexed, stillPending }
+  return { checked: total, nowIndexed, stillPending, emailed }
 }

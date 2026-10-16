@@ -10,6 +10,8 @@ export function statInfo(key: string, c: JournalMetricsConfig, sys: SystemFigure
   const s = SYSTEM_STATS.find((x) => x.key === key)
   if (s) return { key, label: s.label, value: sys[s.key].display, note: 'Calculated' }
   if (key === 'sjif') return c.sjif.value.trim() ? { key, label: 'SJIF impact factor', value: c.sjif.value.trim(), note: c.sjif.year ? `SJIF ${c.sjif.year}` : 'SJIF' } : undefined
+  const cs = c.customStats.find((x) => `custom:${x.id}` === key)
+  if (cs) return { key, label: cs.label, value: `${cs.value}${cs.unit ? ` ${cs.unit}` : ''}`, note: 'Custom' }
   const r = c.ratings.find((x) => `rating:${x.id}` === key)
   return r ? { key, label: r.name || 'Rating', value: r.value || '-', note: r.year ? String(r.year) : 'Manual' } : undefined
 }
@@ -68,6 +70,7 @@ export function MetricsPreview({ config, system, domain }: { config: JournalMetr
             <ul className="flex flex-wrap gap-2">
               {logos.map((l) => (
                 <li key={l.id} className={cn('rounded-md border bg-surface px-2.5 py-1.5 text-center', LOGO_TONE[l.status])}>
+                  {l.image?.data && <img src={l.image.data} alt="" className="mx-auto mb-1 h-8 max-w-[96px] object-contain" />}
                   <p className="flex items-center justify-center gap-1 text-sm font-semibold">
                     {l.status === 'indexed' && <BadgeCheck size={14} strokeWidth={1.75} aria-hidden />}
                     {l.name}
