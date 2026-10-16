@@ -4,7 +4,8 @@ import { menuFor } from '@/navigation/nav'
 import { useCurrentUser, useRole } from '@/permissions/hooks'
 import { ROLE_META } from '@/permissions/roles'
 import { useSession } from '@/mock/store'
-import { cn, initials } from '@/lib/utils'
+import { cn } from '@/lib/utils'
+import { UserAvatar } from '@/components/UserAvatar'
 import { useUi } from './uiStore'
 
 export function Logo({ compact, dark }: { compact?: boolean; dark?: boolean }) {
@@ -79,7 +80,7 @@ function UserCard({ collapsed }: { collapsed: boolean }) {
   if (!user) return null
   return (
     <div className={cn('flex items-center gap-2.5 rounded-lg bg-white/5 p-2', collapsed && 'justify-center p-1.5')} title={collapsed ? `${user.name} · ${role ? ROLE_META[role].label : ''}` : undefined}>
-      <span aria-hidden className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-indigo-500/30 text-xs font-semibold text-indigo-100">{initials(user.name)}</span>
+      <UserAvatar name={user.name} photo={user.photo} size={32} tone="dark" />
       {!collapsed && (
         <span className="min-w-0 leading-tight">
           <span className="block truncate text-[13px] font-medium text-white">{user.name}</span>

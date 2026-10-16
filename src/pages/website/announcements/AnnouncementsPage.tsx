@@ -42,6 +42,7 @@ function ChannelTable({ channel, data, loading, error, reload }: { channel: Anno
     return () => clearInterval(t)
   }, [])
 
+  const typeOptions = useMemo(() => [...new Set([...ANNOUNCEMENT_TYPES as readonly string[], ...(data ?? []).filter((a) => a.channel === channel).map((a) => a.type)])], [data, channel])
   const rows = useMemo(() => {
     return (data ?? []).filter((a) => a.channel === channel).map((a) => ({ a, s: announcementStatus(a, now) })).filter((r) => (!status || r.s === status) && (!type || r.a.type === type))
   }, [data, status, type, now, channel])
@@ -120,7 +121,7 @@ function ChannelTable({ channel, data, loading, error, reload }: { channel: Anno
         search={{ placeholder: 'Search notifications…', text: (r) => `${r.a.title} ${r.a.body} ${r.a.type}` }}
         filters={<>
           <SelectFilter label="Status" value={status} onChange={setStatus} options={Object.entries(STATUS).map(([value, m]) => ({ value, label: m.label }))} />
-          <SelectFilter label="Type" value={type} onChange={setType} options={ANNOUNCEMENT_TYPES.map((t) => ({ value: t, label: t }))} />
+          <SelectFilter label="Type" value={type} onChange={setType} options={typeOptions.map((t) => ({ value: t, label: t }))} />
         </>}
         empty={{ icon: Megaphone, title: `No ${noun}s match`, hint: 'Post a call for papers, deadline extension or maintenance notice.', action: <button className="btn-primary" onClick={() => setDrawer({})}><CalendarClock size={15} aria-hidden /> New {noun}</button> }}
       />

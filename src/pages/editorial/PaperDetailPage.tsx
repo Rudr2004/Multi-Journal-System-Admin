@@ -12,10 +12,12 @@ import { getPaperDetail } from '@/mock/api/papers'
 import { useDataStore } from '@/mock/store'
 import { useEditorialStore } from '@/mock/stores/editorial'
 import { PaperActions } from './PaperActions'
-import { CommunicationTab, DecisionsTab, FilesTab, OverviewTab, PaymentsTab, ProductionTab, ReviewTab, TimelineTab } from './PaperTabs'
+import { CommunicationTab, OverviewTab, PaymentsTab, ProductionTab, ReviewTab, TimelineTab } from './PaperTabs'
 import { CopyButton, useAccess } from './shared'
 
-const TAB_IDS = ['overview', 'files', 'review', 'decisions', 'payments', 'production', 'communication', 'timeline']
+const TAB_IDS = ['overview', 'review', 'payments', 'production', 'communication', 'timeline']
+/** Older links: Files now lives in Overview and Decision history in Review. */
+const LEGACY_TABS: Record<string, string> = { files: 'overview', decisions: 'review' }
 
 export function PaperDetailPage() {
   const { paperId = '' } = useParams()
@@ -61,15 +63,13 @@ export function PaperDetailPage() {
 
   const tabs: TabDef[] = [
     { id: 'overview', label: 'Overview', content: <OverviewTab paper={paper} detail={d} /> },
-    { id: 'files', label: 'Files', content: <FilesTab paper={paper} /> },
-    { id: 'review', label: 'Review', badge: reviews.filter((r) => r.paperId === paper.id).length || undefined, content: <ReviewTab paper={paper} /> },
-    { id: 'decisions', label: 'Decision history', badge: decisions.filter((x) => x.paperId === paper.id).length || undefined, content: <DecisionsTab paper={paper} /> },
+    { id: 'review', label: 'Review', badge: reviews.filter((r) => r.paperId === paper.id).length + decisions.filter((x) => x.paperId === paper.id).length || undefined, content: <ReviewTab paper={paper} /> },
     { id: 'payments', label: 'Payments', badge: payCount || undefined, content: <PaymentsTab paper={paper} /> },
     { id: 'production', label: 'Production', content: <ProductionTab paper={paper} /> },
     { id: 'communication', label: 'Communication', badge: msgCount || undefined, content: <CommunicationTab paper={paper} /> },
     { id: 'timeline', label: 'Timeline & audit', content: <TimelineTab paper={paper} /> },
   ]
-  const requested = params.get('tab') ?? 'overview'
+  const requested = LEGACY_TABS[params.get('tab') ?? ''] ?? params.get('tab') ?? 'overview'
   const tab = TAB_IDS.includes(requested) ? requested : 'overview'
 
   return (

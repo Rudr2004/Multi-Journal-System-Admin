@@ -1,4 +1,4 @@
-import type { Issue, IssueStatus, JournalCode, Paper } from '@/shared/types'
+import type { Duration, FileRef, Issue, IssueFileKey, IssueStatus, JournalCode, Paper } from '@/shared/types'
 import { ISSUE_FLOW, ISSUE_STATUS_META, isPublished } from '../data/publishing'
 import { addDeposit, logEvent, recordAudit } from '../actions'
 import { useDataStore } from '../store'
@@ -14,6 +14,10 @@ export interface IssueInput {
   submissionDeadline: string
   publicationDate: string
   callForPapers: string
+  /** Expected time to the first review decision, e.g. 2 days or 36 hours. */
+  firstReviewTime?: Duration
+  /** Expected time from acceptance to publication. */
+  publicationTime?: Duration
 }
 
 const summarise = (i: Issue): IssueSummary => ({
@@ -70,6 +74,7 @@ export async function createIssue(input: IssueInput & { journal: JournalCode; vo
     id: issueIdFor(input.journal, input.volume, input.number), journal: input.journal, volume: input.volume, number: input.number,
     label: `Volume ${input.volume}, Issue ${input.number}`, month: input.month, submissionDeadline: input.submissionDeadline,
     publicationDate: input.publicationDate, status: 'draft', callForPapers: input.callForPapers, articleIds: [], pages: {},
+    firstReviewTime: input.firstReviewTime, publicationTime: input.publicationTime, files: {},
   }
   const { issues, patch } = useDataStore.getState()
   patch({ issues: [...issues, issue] })
@@ -94,6 +99,7 @@ export async function saveIssue(id: string, input: IssueSave): Promise<Issue> {
   const next: Issue = {
     ...current, number: input.number, month: input.month, submissionDeadline: input.submissionDeadline, publicationDate: input.publicationDate,
     callForPapers: input.callForPapers, articleIds: input.articleIds, pages,
+    firstReviewTime: input.firstReviewTime ?? current.firstReviewTime, publicationTime: input.publicationTime ?? current.publicationTime,
     label: current.conferenceId ? current.label : `Volume ${current.volume}, Issue ${input.number}`,
   }
   patchIssue(id, () => next)
@@ -108,6 +114,33 @@ export async function saveIssue(id: string, input: IssueSave): Promise<Issue> {
   const removed = current.articleIds.filter((a) => !input.articleIds.includes(a)).length
   recordAudit({ journal: current.journal, action: 'Issue updated', target: id, oldValue: `${current.articleIds.length} articles`, newValue: `${input.articleIds.length} articles (+${added} / −${removed})` })
   return delay(next)
+}
+
+export const ISSUE_FILE_LABEL: Record<IssueFileKey, string> = {
+  fullIssue: 'Full issue (PDF)',
+  indexPage: 'Index page (PDF)',
+  coverPage: 'Cover page (PDF)',
+  manuscriptTemplate: 'Manuscript template',
+}
+
+/**
+ * Uploads, replaces or removes one downloadable file of an issue. Unlike saveIssue this is NOT blocked once the
+ * issue is published: the full-issue PDF and index page are only produced after the issue closes.
+ */
+export async function saveIssueFile(id: string, key: IssueFileKey, file: FileRef | null): Promise<Issue> {
+  const current = useDataStore.getState().issues.find((i) => i.id === id)
+  if (!current) throw new ApiError('Issue not found', 'not_found')
+  const files = { ...(current.files ?? {}) }
+  const had = files[key]
+  if (file) files[key] = file
+  else delete files[key]
+  const next: Issue = { ...current, files }
+  patchIssue(id, () => next)
+  recordAudit({
+    journal: current.journal, action: file ? (had ? 'Issue file replaced' : 'Issue file uploaded') : 'Issue file removed', target: id,
+    oldValue: had?.name, newValue: file ? `${ISSUE_FILE_LABEL[key]}: ${file.name}` : undefined,
+  })
+  return delay(next, 200, 400)
 }
 
 export async function advanceIssue(id: string): Promise<Issue> {

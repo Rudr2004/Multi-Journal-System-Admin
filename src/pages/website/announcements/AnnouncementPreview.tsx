@@ -2,7 +2,7 @@ import { ArrowUpRight, Pin } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { AnnouncementChannel, AnnouncementType } from '@/mock/data/website'
 
-export interface PreviewItem { id?: string; text: string; detail?: string; link?: string; type: AnnouncementType; highlight: boolean; pinned: boolean }
+export interface PreviewItem { id?: string; text: string; detail?: string; link?: string; image?: string; type: AnnouncementType; highlight: boolean; pinned: boolean }
 
 const TICKER_CSS = `
 @keyframes ann-ticker { from { transform: translateX(0); } to { transform: translateX(-50%); } }
@@ -16,6 +16,7 @@ function TickerItem({ it, current }: { it: PreviewItem; current?: boolean }) {
     <span className={cn('mx-6 inline-flex items-center gap-2 whitespace-nowrap text-sm', current && 'font-medium')}>
       <span className={cn('rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide', it.highlight ? 'bg-amber-400 text-slate-900' : 'bg-white/15 text-white')}>{it.type}</span>
       {it.pinned && <Pin size={12} strokeWidth={2} aria-label="Pinned" />}
+      {it.image && <img src={it.image} alt="" className="h-5 w-5 rounded object-cover" />}
       <span>{it.text || 'Your notification text appears here'}</span>
       {it.link && <span className="inline-flex items-center gap-0.5 underline underline-offset-2">Read more <ArrowUpRight size={12} aria-hidden /></span>}
     </span>
@@ -66,6 +67,7 @@ export function AnnouncementPreview({ channel, current, others, journalName }: {
                   {it === current && <span className="text-accent">This notice</span>}
                 </p>
                 <p className="mt-1 font-medium">{it.text || 'Your notification text appears here'}</p>
+                {it.image && <img src={it.image} alt="" className="mt-2 h-24 w-full rounded-md object-cover" />}
                 {it.detail && <p className="mt-0.5 text-xs text-muted">{it.detail}</p>}
                 {it.link && <p className="mt-1 inline-flex items-center gap-0.5 text-xs text-accent underline">Read more <ArrowUpRight size={11} aria-hidden /></p>}
               </li>

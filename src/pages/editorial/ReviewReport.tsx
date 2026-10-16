@@ -6,7 +6,7 @@ import { SCORE_CRITERIA, averageScore, recommendationMeta, type ReviewRecord } f
 
 /**
  * Formatted review report, shown as a PDF-style page.
- * `forAuthor` hides the confidential comments to the editor and the reviewer's identity.
+ * `forAuthor` hides the reviewer's identity. The Reviewer Justification is part of every report.
  */
 export function ReviewReport({ review, paperTitle, forAuthor, showDownload = true }: {
   review: ReviewRecord; paperTitle: string; forAuthor?: boolean; showDownload?: boolean
@@ -56,12 +56,8 @@ export function ReviewReport({ review, paperTitle, forAuthor, showDownload = tru
         <h4 className="mt-5 border-b border-slate-200 pb-1 text-[11px] font-semibold uppercase tracking-wider text-slate-500">Comments to the author</h4>
         <p className="mt-2 whitespace-pre-wrap">{review.commentsToAuthor}</p>
 
-        {!forAuthor && (
-          <>
-            <h4 className="mt-5 border-b border-slate-200 pb-1 text-[11px] font-semibold uppercase tracking-wider text-slate-500">Confidential comments to the editor</h4>
-            <p className="mt-2 whitespace-pre-wrap">{review.commentsToEditor || 'None provided.'}</p>
-          </>
-        )}
+        <h4 className="mt-5 border-b border-slate-200 pb-1 text-[11px] font-semibold uppercase tracking-wider text-slate-500">Reviewer Justification</h4>
+        <p className="mt-2 whitespace-pre-wrap">{review.commentsToEditor || 'None provided.'}</p>
         <footer className="mt-6 border-t border-slate-200 pt-2 text-[11px] text-slate-500">Confidential peer-review document. Do not distribute.</footer>
       </article>
     </div>

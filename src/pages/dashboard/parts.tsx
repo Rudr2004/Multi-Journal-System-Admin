@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom'
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip as ChartTip, XAxis, YAxis } from 'recharts'
 import type { Paper, Role } from '@/shared/types'
 import { useRole } from '@/permissions/hooks'
+import { paperStagePath } from '@/lib/paperRoutes'
 import { JournalBadge, StatusBadge } from '@/components/Badges'
 import { Skeleton } from '@/components/States'
 import { CHART_COLORS } from '@/styles/tokens'
@@ -25,7 +26,7 @@ export function TitleCell({ paper }: { paper: Paper }) {
   const role = useRole()
   return (
     <div className="min-w-0">
-      <Link to={paperPath(role, paper.id)} className="whitespace-nowrap font-medium text-accent hover:underline">{paper.id}</Link>
+      <Link to={paperStagePath(role, paper)} className="whitespace-nowrap font-medium text-accent hover:underline">{paper.id}</Link>
       <p className="line-clamp-2 max-w-[460px] text-sm text-muted" title={paper.title}>{paper.title}</p>
     </div>
   )

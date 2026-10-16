@@ -1,6 +1,9 @@
+import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { BadgeCheck, FilePenLine, Gavel, Wallet } from 'lucide-react'
-import { getEditorOverview, getRecentActivity } from '@/mock/api/dashboard'
+import { BadgeCheck, CalendarRange, FilePenLine, Gavel, Inbox, Wallet } from 'lucide-react'
+import { getEditorOverview, getRecentActivity, type DateRange } from '@/mock/api/dashboard'
+import { listSubmissions as listForms } from '@/mock/api/forms'
+import { FORM_STATUS_LABEL, FORM_TYPE_LABEL } from '@/mock/data/website'
 import { useSession } from '@/mock/store'
 import { useJournals } from '@/permissions/hooks'
 import { useAsync } from '@/lib/useAsync'
@@ -11,12 +14,33 @@ import { Badge, JournalBadge } from '@/components/Badges'
 import { EmptyState, ErrorState } from '@/components/States'
 import { RelativeTime } from '@/components/Time'
 import { CHANGE_TYPE_META } from '@/mock/data/production'
+import { AssociateInstructionsCard, AutoAssignCard } from './NotesCards'
 import { LINK, PaperTable, ScholarCard, StageChart, TD, TH, TableSkeleton, CELL } from './parts'
 
+const PRESETS = [
+  { value: 'all', label: 'All time', days: 0 },
+  { value: '7', label: 'Last 7 days', days: 7 },
+  { value: '30', label: 'Last 30 days', days: 30 },
+  { value: '90', label: 'Last 90 days', days: 90 },
+  { value: 'custom', label: 'Custom range', days: 0 },
+] as const
+const isoDaysAgo = (d: number) => new Date(Date.now() - d * 86_400_000).toISOString().slice(0, 10)
+
 export function EditorDashboard() {
+  const [preset, setPreset] = useState<string>('all')
+  const [from, setFrom] = useState('')
+  const [to, setTo] = useState('')
+  const range = useMemo<DateRange>(() => {
+    if (preset === 'custom') return { from: from || undefined, to: to || undefined }
+    const p = PRESETS.find((x) => x.value === preset)
+    return p && p.days ? { from: isoDaysAgo(p.days) } : {}
+  }, [preset, from, to])
   const scope = useSession((s) => s.journal)
   const journals = useJournals()
-  const q = useAsync(() => getEditorOverview(scope, journals), [scope, journals.join()])
+  const q = useAsync(() => getEditorOverview(scope, journals, range), [scope, journals.join(), range.from, range.to])
+  const forms = useAsync(() => listForms(journals), [journals.join()])
+  const formList = forms.data ?? []
+  const formCount = (st: string) => formList.filter((f) => f.status === st).length
   const activity = useAsync(() => getRecentActivity(scope, journals), [scope, journals.join()])
   const d = q.data
   const all = scope === 'ALL'
@@ -24,6 +48,21 @@ export function EditorDashboard() {
 
   return (
     <div className="space-y-6">
+      <section aria-label="Date filter" className="flex flex-wrap items-center gap-3 rounded-lg border border-line bg-surface px-4 py-3">
+        <span className="inline-flex items-center gap-2 text-sm font-medium"><CalendarRange size={16} aria-hidden /> Show submissions from</span>
+        <select aria-label="Date range" className="input !w-auto min-w-[150px]" value={preset} onChange={(e) => setPreset(e.target.value)}>
+          {PRESETS.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
+        </select>
+        {preset === 'custom' && (
+          <div className="flex items-center gap-1.5 text-sm text-muted">
+            <input type="date" aria-label="From date" className="input !w-auto" value={from} max={to || undefined} onChange={(e) => setFrom(e.target.value)} />
+            <span aria-hidden>–</span>
+            <input type="date" aria-label="To date" className="input !w-auto" value={to} min={from || undefined} onChange={(e) => setTo(e.target.value)} />
+          </div>
+        )}
+        {preset !== 'all' && <button type="button" className="btn-ghost !h-8" onClick={() => { setPreset('all'); setFrom(''); setTo('') }}>Clear</button>}
+        <span className="text-xs text-muted">Applies to the figures, pipeline and lists below.</span>
+      </section>
       <section aria-label="Key figures" className="grid grid-cols-2 gap-4 md:grid-cols-4">
         <KpiCard label="Decisions due" value={d && formatNumber(d.decisions.length)} icon={Gavel} loading={loading} tone={d?.decisions.length ? 'warning' : 'default'} to="/submissions" />
         <KpiCard label="Payments to verify" value={d && formatNumber(d.payments.length)} icon={Wallet} loading={loading} tone={d?.payments.length ? 'warning' : 'default'} to="/payments" />
@@ -54,6 +93,31 @@ export function EditorDashboard() {
                 )}
               </SectionCard>
             </div>
+          </div>
+
+          <SectionCard title="Forms Inbox" action={<Link to="/forms-inbox" className={LINK}>Open Forms Inbox</Link>} flush>
+            {forms.loading ? <TableSkeleton rows={3} /> : formList.length === 0 ? <EmptyState icon={Inbox} title="No applications or enquiries" hint="Reviewer, board, conference and general forms from the website arrive here." /> : (
+              <div className="grid gap-4 p-4 lg:grid-cols-[auto_1fr]">
+                <dl className="grid grid-cols-3 gap-3 lg:grid-cols-1">
+                  {(['new', 'under_review', 'on_hold'] as const).map((st) => (
+                    <div key={st} className="rounded-lg bg-subtle px-4 py-2.5"><dt className="text-xs text-muted">{FORM_STATUS_LABEL[st]}</dt><dd className="text-xl font-semibold tabular-nums">{formCount(st)}</dd></div>
+                  ))}
+                </dl>
+                <ul className="divide-y divide-line">
+                  {formList.filter((f) => f.status === 'new' || f.status === 'under_review').slice(0, 5).map((f) => (
+                    <li key={f.id} className="flex items-start justify-between gap-3 py-2 text-sm first:pt-0">
+                      <div className="min-w-0"><Link to="/forms-inbox" className="font-medium text-accent hover:underline">{f.name}</Link><p className="truncate text-xs text-muted">{FORM_TYPE_LABEL[f.type]} · {f.subject}</p></div>
+                      <div className="flex shrink-0 flex-col items-end gap-1"><Badge tone={f.status === 'new' ? 'warning' : 'info'}>{FORM_STATUS_LABEL[f.status]}</Badge><span className="text-xs text-muted"><RelativeTime value={f.receivedAt} /></span></div>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </SectionCard>
+
+          <div className="grid gap-6 xl:grid-cols-3">
+            <div className="xl:col-span-2"><AssociateInstructionsCard /></div>
+            <AutoAssignCard />
           </div>
 
           <div className="grid gap-6 xl:grid-cols-2">

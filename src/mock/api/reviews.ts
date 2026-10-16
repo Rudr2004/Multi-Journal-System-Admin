@@ -6,7 +6,7 @@ import {
   type FileVersion, type Recommendation, type ReminderState, type ReviewDraft, type ReviewRecord, type ReviewScores, type ReviewerKind,
 } from '../data/editorial'
 import { useDataStore, useSession } from '../store'
-import { draftKey, useEditorialStore } from '../stores/editorial'
+import { draftKey, useEditorialStore, type AssignmentMeta, type AssignmentResult, type AssignmentState } from '../stores/editorial'
 import { ApiError, delay } from './latency'
 
 const rawPaper = (id: string) => {
@@ -65,7 +65,7 @@ export async function assignReviewer(args: { paperIds: string[]; reviewerId: str
     const p = rawPaper(id)
     const c = candidatesFor(p, users, flagOn)
     const ok = [...c.inHouse, ...c.panel].some((x) => x.user.id === reviewer.id)
-    if (!ok || !['screening', 'under_review', 'decision_pending'].includes(p.status)) { skipped.push(id); continue }
+    if (!ok || !['submitted', 'screening', 'under_review', 'decision_pending'].includes(p.status)) { skipped.push(id); continue }
     const kind = reviewerKindOf(reviewer, p.journal)
     const previous = p.reviewerId ? userName(p.reviewerId, users) : undefined
     updatePaper(id, { reviewerId: reviewer.id, reviewDue: new Date(args.due).toISOString(), status: 'under_review' }, {
@@ -120,6 +120,7 @@ export function reviewerOf(p: Paper): string | undefined {
 }
 
 export function listMyReviews(userId: string, journals: JournalCode[]) {
+  sweepOverdueReviews()
   const { papers } = useDataStore.getState()
   const { reviews, drafts } = useEditorialStore.getState()
   const rows = papers
@@ -233,6 +234,7 @@ const DAY = 86_400_000
 
 /** Papers the Editor assigned to external Review Panel Members in the reviewer's journals. No author identity. */
 export async function listReviewAssignments(journals: JournalCode[]): Promise<ReviewAssignmentRow[]> {
+  sweepOverdueReviews()
   await delay(null)
   const { papers, users } = useDataStore.getState()
   const { reviews, drafts, reminders } = useEditorialStore.getState()
@@ -276,5 +278,126 @@ export async function listSubjectSubmissions(userId: string, journals: JournalCo
     .map<SubjectSubmissionRow>(({ p, m }) => ({
       paperId: p.id, journal: p.journal, title: p.title, articleType: p.articleType, status: p.status, submittedAt: p.submittedAt, subjects: paperSubjects(p), matched: m.matched,
     }))
+    .sort((a, b) => b.submittedAt.localeCompare(a.submittedAt))
+}
+
+/* ------------------------------------------------------------------ */
+/* Reviewer: assign external Review Panel Members, auto-reassign         */
+/* ------------------------------------------------------------------ */
+export interface ExternalCandidate { user: StaffUser; matched: string[]; expertise: string[]; score: number; workload: number }
+
+/** Active Review Panel Members of the journal, best subject match first. */
+export function externalCandidates(paperId: string): ExternalCandidate[] {
+  const p = rawPaper(paperId)
+  const { users, papers } = useDataStore.getState()
+  const subjects = paperSubjects(p)
+  return users
+    .filter((u) => u.status === 'active' && u.assignments[p.journal] === 'panel_member')
+    .map((user) => {
+      const m = matchScore(subjects, EXPERTISE[user.id])
+      const workload = papers.filter((x) => reviewerOf(x) === user.id && x.status === 'under_review').length
+      return { user, matched: m.matched, expertise: EXPERTISE[user.id] ?? [], score: m.score, workload }
+    })
+    .sort((a, b) => b.score - a.score || a.workload - b.workload)
+}
+
+function giveToPanelMember(p: Paper, reviewerId: string, due: Date, event: string, note?: string) {
+  const { panelOverrides, reminders, autoReassigned, patch } = useEditorialStore.getState()
+  patch({
+    panelOverrides: { ...panelOverrides, [p.id]: reviewerId },
+    reminders: { ...reminders, [p.id]: { count: 0 } },
+    autoReassigned: { ...autoReassigned, [p.id]: [...new Set([...(autoReassigned[p.id] ?? []), reviewerId])] },
+  })
+  updatePaper(p.id, { reviewerId, reviewDue: due.toISOString(), status: 'under_review' }, { event, note })
+  const member = findUser(reviewerId)
+  if (member) sendMessage({ journal: p.journal, paperId: p.id, recipient: member.email, channel: 'email', template: 'Review assigned', status: 'queued' })
+}
+
+/** The reviewer sends a paper to an external Review Panel Member with a due date. */
+export async function assignExternalReviewer(args: { paperId: string; reviewerId: string; due: string; note?: string }) {
+  await delay(null)
+  const p = rawPaper(args.paperId)
+  const member = findUser(args.reviewerId)
+  if (!member || member.assignments[p.journal] !== 'panel_member' || member.status !== 'active') throw new ApiError('Choose an active Review Panel Member of this journal.', 'invalid')
+  if (!['submitted', 'screening', 'under_review', 'decision_pending'].includes(p.status)) throw new ApiError('This paper is no longer in review.', 'invalid')
+  const due = new Date(args.due)
+  if (Number.isNaN(due.getTime()) || due.getTime() < new Date(new Date().toDateString()).getTime()) throw new ApiError('Choose a due date that is today or later.', 'invalid')
+  const previous = reviewerOf(p)
+  giveToPanelMember(p, member.id, due,
+    previous && previous !== member.id ? `reassigned the review from ${userName(previous, useDataStore.getState().users)} to ${member.name} (Review Panel Member), due ${formatDate(args.due)}` : `assigned ${member.name} (Review Panel Member) as reviewer, due ${formatDate(args.due)}`, args.note || undefined)
+  recordAudit({ journal: p.journal, action: previous ? 'Reviewer reassigned' : 'Reviewer assigned', target: p.id, oldValue: previous ? userName(previous, useDataStore.getState().users) : 'None', newValue: member.name })
+  const withdrawn = previous && previous !== member.id ? findUser(previous) : undefined
+  if (withdrawn) sendMessage({ journal: p.journal, paperId: p.id, recipient: withdrawn.email, channel: 'email', template: 'Review assignment withdrawn', status: 'queued' })
+  return member
+}
+
+/** Overdue panel reviews with no report go to another matching Review Panel Member automatically. */
+export function sweepOverdueReviews() {
+  const { papers, users } = useDataStore.getState()
+  const { reviews, autoReassigned } = useEditorialStore.getState()
+  const today = new Date(new Date().toDateString()).getTime()
+  for (const p of papers) {
+    if (p.status !== 'under_review' || !p.reviewDue || new Date(p.reviewDue).getTime() >= today) continue
+    const rid = reviewerOf(p)
+    const current = rid ? users.find((u) => u.id === rid) : undefined
+    if (!current || reviewerKindOf(current, p.journal) !== 'panel') continue
+    if (reviews.some((r) => r.paperId === p.id && r.reviewerId === current.id)) continue
+    const tried = new Set([...(autoReassigned[p.id] ?? []), current.id])
+    const pool = externalCandidates(p.id)
+    const next = pool.find((c) => !tried.has(c.user.id)) ?? pool.find((c) => c.user.id !== current.id) ?? pool[0]
+    if (!next) continue
+    giveToPanelMember(p, next.user.id, new Date(Date.now() + 14 * DAY),
+      next.user.id === current.id ? `auto-assigned the review to ${next.user.name} again; no report was submitted by the due date` : `auto-reassigned the review from ${current.name} to ${next.user.name}; no report was submitted by the due date`)
+    recordAudit({ journal: p.journal, action: 'Review auto-reassigned', target: p.id, oldValue: current.name, newValue: next.user.name })
+  }
+}
+
+export const assignmentMetaOf = (paperId: string, userId?: string): AssignmentMeta =>
+  (userId && useEditorialStore.getState().assignmentMeta[draftKey(paperId, userId)]) || { state: 'open', result: 'not_set' }
+
+export async function setAssignmentMeta(paperId: string, userId: string, patch: Partial<{ state: AssignmentState; result: AssignmentResult }>) {
+  const { assignmentMeta, patch: set } = useEditorialStore.getState()
+  const key = draftKey(paperId, userId)
+  const next = { ...assignmentMetaOf(paperId, userId), ...patch }
+  set({ assignmentMeta: { ...assignmentMeta, [key]: next } })
+  const p = rawPaper(paperId)
+  recordAudit({ journal: p.journal, action: patch.state ? 'Review assignment status changed' : 'Review assignment result changed', target: paperId, newValue: String(patch.state ?? patch.result) })
+  await delay(null, 100, 250)
+}
+
+export interface AllSubmissionRow {
+  paperId: string
+  journal: JournalCode
+  title: string
+  subjects: string[]
+  matched: string[]
+  status: Paper['status']
+  submittedAt: string
+  panelMemberId?: string
+  panelMemberName?: string
+  due?: string
+  autoReassigned: number
+}
+
+const OPEN_FOR_REVIEW: Paper['status'][] = ['submitted', 'screening', 'under_review', 'decision_pending']
+
+/** Every article in the reviewer's journals that is awaiting or in review, with its external reviewer if one is assigned. */
+export async function listAllSubmissions(userId: string, journals: JournalCode[]): Promise<AllSubmissionRow[]> {
+  sweepOverdueReviews()
+  await delay(null)
+  const { papers, users } = useDataStore.getState()
+  const { autoReassigned } = useEditorialStore.getState()
+  const expertise = EXPERTISE[userId] ?? []
+  return papers
+    .filter((p) => journals.includes(p.journal) && OPEN_FOR_REVIEW.includes(p.status))
+    .map<AllSubmissionRow>((p) => {
+      const rid = reviewerOf(p)
+      const member = rid ? users.find((u) => u.id === rid) : undefined
+      const external = member && reviewerKindOf(member, p.journal) === 'panel' ? member : undefined
+      return {
+        paperId: p.id, journal: p.journal, title: p.title, subjects: paperSubjects(p), matched: matchScore(paperSubjects(p), expertise).matched, status: p.status, submittedAt: p.submittedAt,
+        panelMemberId: external?.id, panelMemberName: external?.name, due: external ? p.reviewDue : undefined, autoReassigned: Math.max(0, (autoReassigned[p.id]?.length ?? 0) - (external ? 1 : 0)),
+      }
+    })
     .sort((a, b) => b.submittedAt.localeCompare(a.submittedAt))
 }

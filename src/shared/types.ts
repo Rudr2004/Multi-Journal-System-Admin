@@ -20,6 +20,9 @@ export interface StaffUser {
   title: string
   status: UserStatus
   twoStep: boolean
+  phone?: string
+  /** Profile photo as a data URL. */
+  photo?: string
   /** Role per journal. One person can hold different roles in different journals. */
   assignments: Partial<Record<JournalCode, Role>>
 }
@@ -62,6 +65,8 @@ export interface Paper {
   reviewDue?: string
   productionDue?: string
   dispatchAt?: string // queued for 08:45
+  /** Set when the Editor placed this article under a past (published) issue through Backdated publications. */
+  backdatedIssueId?: string
 }
 
 export interface Ticket {
@@ -136,6 +141,23 @@ export interface Payment {
   refundedAt?: string
 }
 
+/** A file stored with a record (prototype keeps the bytes as a data URL so it can be downloaded again). */
+export interface FileRef {
+  name: string
+  size: number
+  uploadedAt: string
+  data?: string
+}
+
+/** An editable length of time, e.g. 2 days or 36 hours. */
+export interface Duration {
+  value: number
+  unit: 'hours' | 'days'
+}
+
+export type IssueFileKey = 'fullIssue' | 'indexPage' | 'coverPage' | 'manuscriptTemplate'
+export type IssueFiles = Partial<Record<IssueFileKey, FileRef>>
+
 export type IssueStatus = 'draft' | 'open' | 'in_production' | 'published'
 
 export interface Issue {
@@ -153,6 +175,12 @@ export interface Issue {
   pages: Record<string, string> // paperId -> "12–19"
   conferenceId?: string
   actualOnlineDate?: string
+  /** Expected time to the first review decision for papers in this issue. */
+  firstReviewTime?: Duration
+  /** Expected time from acceptance to publication. */
+  publicationTime?: Duration
+  /** Downloadable PDFs; editable even after the issue is published. */
+  files?: IssueFiles
 }
 
 export interface PaperEvent {
@@ -193,6 +221,10 @@ export interface Author {
   country: string
   orcid?: string
   corresponding?: boolean
+  /** Contact number shown to editors. */
+  phone?: string
+  /** Author photo (data URL or image link). */
+  photo?: string
 }
 
 export type DepositStatus = 'pending' | 'success' | 'failed' | 're_deposited'

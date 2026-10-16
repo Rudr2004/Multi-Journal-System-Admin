@@ -9,6 +9,7 @@ import {
 } from '../data/editorial'
 import { useDataStore } from '../store'
 import { useEditorialStore } from '../stores/editorial'
+import { usePublishingStore } from '../stores/publishing'
 import { ApiError, delay } from './latency'
 
 export interface AccessCtx {
@@ -31,12 +32,24 @@ export interface SubmissionRow extends Paper {
   subjects: string[]
 }
 
+/** The conference a paper belongs to: a real link made in Conference Proceedings wins over the demo label. */
+/** Papers linked to a conference are handled under Conference Proceedings. */
+function isConferencePaper(id: string) {
+  return Object.values(usePublishingStore.getState().links).some((ids) => ids.includes(id))
+}
+
+function conferenceNameFor(p: Paper) {
+  const { conferences, links } = usePublishingStore.getState()
+  const id = Object.keys(links).find((k) => links[k].includes(p.id))
+  return conferences.find((c) => c.id === id)?.shortName ?? conferenceFor(p)
+}
+
 export const listSubmissions = (ctx: AccessCtx) =>
   delay(
     useDataStore
       .getState()
-      .papers.filter((p) => visible(p, ctx))
-      .map<SubmissionRow>((p) => ({ ...p, conference: conferenceFor(p), subjects: paperSubjects(p) }))
+      .papers.filter((p) => visible(p, ctx) && !isConferencePaper(p.id))
+      .map<SubmissionRow>((p) => ({ ...p, conference: conferenceNameFor(p), subjects: paperSubjects(p) }))
       .sort((a, b) => b.submittedAt.localeCompare(a.submittedAt)),
   )
 
@@ -60,7 +73,7 @@ export async function getPaperDetail(paperId: string, ctx: AccessCtx): Promise<P
   }
   return delay({
     paperId, abstract: abstractFor(p), keywords: keywordsFor(p), subjects: paperSubjects(p), authors: getAuthors(paperId),
-    mentor: mentorFor(p), referral: referralFor(p), conference: conferenceFor(p), wordCount: wordCountFor(p),
+    mentor: mentorFor(p), referral: referralFor(p), conference: conferenceNameFor(p), wordCount: wordCountFor(p),
   })
 }
 
@@ -99,7 +112,7 @@ const ACTION_KIND: Record<DecisionAction, DecisionKind> = {
 }
 
 /** Record an editorial decision: status, timeline, audit, decision history and the (queued) author email. */
-export async function decidePaper(paperId: string, action: DecisionAction, reason: string) {
+export async function decidePaper(paperId: string, action: DecisionAction, reason: string, basedOnReviewIds: string[] = []) {
   await delay(null)
   const before = rawPaper(paperId)
   const kind = ACTION_KIND[action]
@@ -111,6 +124,7 @@ export async function decidePaper(paperId: string, action: DecisionAction, reaso
   const decision: DecisionRecord = {
     id: `dec-${paperId}-${Date.now().toString(36)}`, paperId, kind, reason, by: currentActor(), at: new Date().toISOString(),
     round: store.decisions.filter((d) => d.paperId === paperId).length + 1,
+    basedOn: store.reviews.filter((r) => r.paperId === paperId && basedOnReviewIds.includes(r.id)).map((r) => ({ id: r.id, reviewerName: r.reviewerName, recommendation: r.recommendation })),
   }
   store.patch({ decisions: [decision, ...store.decisions] })
 
@@ -125,7 +139,7 @@ export async function decidePaper(paperId: string, action: DecisionAction, reaso
   updatePaper(paperId, {
     status,
     ...(accepted ? { dispatchAt, paymentStatus: before.paymentStatus === 'none' ? 'pending' : before.paymentStatus } : {}),
-  }, { event: eventText, note: reason })
+  }, { event: eventText, note: decision.basedOn?.length ? `${reason}\n(Based on the report${decision.basedOn.length > 1 ? 's' : ''} of ${decision.basedOn.map((b) => b.reviewerName).join(', ')})` : reason })
   recordAudit({
     journal: before.journal,
     action: action === 'approve_no_review' ? 'Accepted without review report' : action === 'quick_approve' ? 'Quick approve' : `Decision: ${kind.replace('_', ' ')}`,

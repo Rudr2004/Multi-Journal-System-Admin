@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { ArrowLeft, Check, CheckCircle2, Copy, FileCheck2, FileUp, Link2, Mail, Award, Paperclip, Send, ThumbsDown, ThumbsUp } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, Check, Pencil, CheckCircle2, Copy, FileCheck2, FileUp, Link2, Mail, Award, Paperclip, Send, ThumbsDown, ThumbsUp } from 'lucide-react'
 import { PageHeader } from '@/layout/PageHeader'
 import { Badge, JournalBadge, StatusBadge } from '@/components/Badges'
 import { SectionCard } from '@/components/Card'
@@ -22,11 +22,12 @@ import {
   decideChangeRequest, getChangeRequest, markFeePaid, previewFee, releaseWithoutFee, reviewNewVersion, setCorrectionFee, startReview,
   submitNewVersion, waiveCorrectionFee, workBlockReason, type ChangeDetail,
 } from '@/mock/api/postPublication'
-import { CHANGE_TYPE_META, type ChangeRequest } from '@/mock/data/production'
+import { CHANGE_TYPE_META, type ChangeRequest, type MetadataEdit } from '@/mock/data/production'
 import { formatDate, formatDateTime, formatMoney } from '@/shared/formatters'
 import { doiFor } from '@/shared/paperId'
 import type { Currency } from '@/shared/gst'
 import { ChangeStatusBadge, ChangeTypeBadge, FeeBadge } from './postPubShared'
+import { EditMetadataDialog } from './EditMetadataDialog'
 
 export function PostPubDetailPage() {
   const { id = '' } = useParams()
@@ -77,6 +78,11 @@ function Detail({ detail }: { detail: ChangeDetail }) {
   const [confirmVersion, setConfirmVersion] = useState(false)
   const [changes, setChanges] = useState(false)
   const [busy, setBusy] = useState(false)
+  const initialMeta = useMemo<MetadataEdit>(() => ({ title: detail.record.title, abstract: detail.record.abstract, keywords: detail.record.keywords, authors: detail.record.authors, finalFileName: detail.record.finalFile?.name, manuscriptName: detail.record.manuscript.fileName }), [detail.record])
+  const [metaEdit, setMetaEdit] = useState<MetadataEdit | undefined>()
+  const [metaOpen, setMetaOpen] = useState(false)
+  const metaEdited = !!metaEdit && JSON.stringify(metaEdit) !== JSON.stringify(initialMeta)
+  const open = r.status === 'ready' || r.status === 'revision'
   const latest = r.versions[r.versions.length - 1]
 
   const act = async (fn: () => Promise<unknown>, ok: string) => {
@@ -104,6 +110,29 @@ function Detail({ detail }: { detail: ChangeDetail }) {
         <span className="text-muted">Paper <span className="whitespace-nowrap text-ink">{paper.id}</span></span><StatusBadge status={paper.status} />
         {!isSupport && !isAe && <Link to={`/submissions/${paper.id}`} className="text-accent hover:underline">Submission record</Link>}
       </div>
+
+      {open && (isAe || canApprove) && (
+        <section aria-label="Required corrections" className="mb-5 rounded-lg border-2 border-amber-300 bg-amber-50 p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="flex items-start gap-2">
+              <AlertTriangle size={20} className="mt-0.5 shrink-0 text-amber-600" aria-hidden />
+              <div>
+                <h2 className="text-base font-semibold text-amber-950">Required corrections</h2>
+                <p className="text-sm text-amber-900">{r.status === 'revision' ? 'The Editor sent version ' + (r.baseVersion + 1) + ' back. Address the note and the changes below.' : 'The Editor approved these changes. Complete them, then send the new version back for approval.'}</p>
+              </div>
+            </div>
+            <GuardedButton allowed={canEdit} why={perm.why('work') ?? 'This request is assigned to another Associate Editor.'} className="btn-primary" onClick={() => setMetaOpen(true)}><Pencil size={15} aria-hidden /> Edit</GuardedButton>
+          </div>
+          {r.status === 'revision' && r.decisionNote && <p className="mt-3 rounded-md bg-white/70 p-3 text-sm text-amber-950"><span className="font-medium">Editor’s note:</span> {r.decisionNote}</p>}
+          <p className="mt-3 text-sm text-amber-950"><span className="font-medium">Reason:</span> {r.reason}</p>
+          <ul className="mt-2 space-y-1.5 text-sm">
+            {r.targets.map((t) => (
+              <li key={t.key} className="rounded-md bg-white/70 px-3 py-2"><span className="font-medium">{t.label}:</span> <span className="text-muted line-through">{t.oldValue || '—'}</span> <span aria-hidden>→</span> <span className="font-medium text-amber-950">{t.newValue || '—'}</span></li>
+            ))}
+          </ul>
+          {metaEdited && <p className="mt-2 text-xs font-medium text-green-800">Metadata edits are saved in your draft. Send the new version to the Editor below.</p>}
+        </section>
+      )}
 
       <ol aria-label="Progress" className="mb-6 grid gap-2" style={{ gridTemplateColumns: `repeat(${steps.length}, minmax(0, 1fr))` }}>
         {steps.map((s, i) => (
@@ -173,8 +202,8 @@ function Detail({ detail }: { detail: ChangeDetail }) {
 
           {(r.status === 'ready' || r.status === 'revision') && (
             canEdit || isAe ? (
-              <NewVersionForm key={`${r.id}-${r.versions.length}-${r.events.length}`} request={r} canEdit={canEdit} why={perm.why('work') ?? 'This request is assigned to another Associate Editor.'} busy={busy}
-                onSubmit={(values, summary) => act(() => submitNewVersion(r.id, values, summary), `Version ${r.baseVersion + 1} sent back to the Editor for approval.`)} />
+              <NewVersionForm key={`${r.id}-${r.versions.length}-${r.events.length}`} request={r} canEdit={canEdit} why={perm.why('work') ?? 'This request is assigned to another Associate Editor.'} busy={busy} metaEdited={metaEdited} onEditMeta={() => setMetaOpen(true)}
+                onSubmit={(values, summary) => act(async () => { await submitNewVersion(r.id, values, summary, metaEdited ? metaEdit : undefined); setMetaEdit(undefined) }, `Version ${r.baseVersion + 1} sent back to the Editor for approval.`)} />
             ) : (
               <SectionCard title="With the Associate Editor">
                 <p className="text-sm text-muted">{users.find((u) => u.id === r.assigneeId)?.name ?? 'The Associate Editor'} is preparing version {r.baseVersion + 1}. You approve it when it comes back.
@@ -222,6 +251,7 @@ function Detail({ detail }: { detail: ChangeDetail }) {
         </SectionCard>
       </div>
 
+      <EditMetadataDialog open={metaOpen} onClose={() => setMetaOpen(false)} initial={metaEdit ?? initialMeta} onSave={(m) => { setMetaEdit(m); toast.success('Metadata changes saved to the draft version.') }} />
       <ConfirmDialog open={confirmApprove} onClose={() => setConfirmApprove(false)} danger title={`${approveLabel} for ${paper.id}?`} confirmLabel={approveLabel}
         onConfirm={() => act(() => decideChangeRequest(r.id, 'approve'), r.type === 'retraction' ? 'Article retracted.' : 'Article withdrawn.')}
         consequences={[
@@ -345,7 +375,7 @@ function DiffTable({ version, baseVersion }: { version: ChangeRequest['versions'
   )
 }
 
-function NewVersionForm({ request: r, canEdit, why, busy, onSubmit }: { request: ChangeRequest; canEdit: boolean; why: string; busy: boolean; onSubmit: (values: Record<string, string>, summary: string) => void }) {
+function NewVersionForm({ request: r, canEdit, why, busy, metaEdited, onEditMeta, onSubmit }: { request: ChangeRequest; canEdit: boolean; why: string; busy: boolean; metaEdited: boolean; onEditMeta: () => void; onSubmit: (values: Record<string, string>, summary: string) => void }) {
   const prev = r.versions[r.versions.length - 1]
   const [values, setValues] = useState<Record<string, string>>(() => Object.fromEntries(r.targets.map((t) => [t.key, prev?.changes.find((c) => c.field === t.label)?.newValue ?? t.newValue])))
   const [summary, setSummary] = useState(prev?.summary ?? '')
@@ -354,9 +384,9 @@ function NewVersionForm({ request: r, canEdit, why, busy, onSubmit }: { request:
   const unchanged = useMemo(() => r.targets.every((t) => (values[t.key] ?? '').trim() === t.oldValue), [r.targets, values])
   const blank = r.targets.some((t) => !(values[t.key] ?? '').trim())
   const n = r.baseVersion + 1
-  const submit = () => { setTouched(true); if (!unchanged && !blank && summary.trim().length >= 5) onSubmit(values, summary) }
+  const submit = () => { setTouched(true); if ((!unchanged || metaEdited) && !blank && summary.trim().length >= 5) onSubmit(values, summary) }
   return (
-    <SectionCard title={`Prepare new version (v${n})`}>
+    <SectionCard title={`Prepare new version (v${n})`} action={<GuardedButton allowed={canEdit} why={why} className="btn-secondary !h-8" onClick={onEditMeta}><Pencil size={14} aria-hidden /> Edit Metadata{metaEdited ? ' ✓' : ''}</GuardedButton>}>
       {r.status === 'revision' && r.decisionNote && <p role="note" className="mb-4 rounded-md bg-amber-50 p-3 text-sm text-amber-900"><span className="font-medium">Editor’s note:</span> {r.decisionNote}</p>}
       <p className="mb-4 text-sm text-muted">The published article (version {r.baseVersion}) stays live until version {n} is approved. Check the proposed values and adjust them if needed, then send it back to the Editor for approval.</p>
       <fieldset disabled={!canEdit} className="min-w-0 space-y-4">
@@ -375,7 +405,7 @@ function NewVersionForm({ request: r, canEdit, why, busy, onSubmit }: { request:
             )}
           </FormField>
         ))}
-        <FormField label="Summary of changes" required error={touched && summary.trim().length < 5 ? 'Describe what changed (at least 5 characters).' : touched && unchanged ? 'The new version is identical to the published one.' : undefined}>
+        <FormField label="Summary of changes" required error={touched && summary.trim().length < 5 ? 'Describe what changed (at least 5 characters).' : touched && unchanged && !metaEdited ? 'The new version is identical to the published one.' : undefined}>
           {(a) => <input {...a} className="input" value={summary} onChange={(e) => setSummary(e.target.value)} placeholder="e.g. Corrected the first author’s name" />}
         </FormField>
       </fieldset>
