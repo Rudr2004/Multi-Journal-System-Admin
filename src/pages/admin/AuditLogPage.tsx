@@ -77,6 +77,18 @@ const oneLine = (e: AuditEntry) => {
   return `${first(e.oldValue) ?? '—'}${more(e.oldValue)}  →  ${first(e.newValue) ?? '—'}${more(e.newValue)}`
 }
 
+/** yyyy-MM-ddTHH:mm in local time, as <input type="datetime-local"> expects. */
+const localInput = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}T${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+function quickRange(id: string): { from: string; to: string } | undefined {
+  const now = new Date()
+  const ago = (ms: number) => new Date(now.getTime() - ms)
+  if (id === '1h') return { from: localInput(ago(3_600_000)), to: localInput(now) }
+  if (id === '24h') return { from: localInput(ago(86_400_000)), to: localInput(now) }
+  if (id === '7d') return { from: localInput(ago(7 * 86_400_000)), to: localInput(now) }
+  if (id === 'today') { const d = new Date(now); d.setHours(0, 0, 0, 0); return { from: localInput(d), to: localInput(now) } }
+  return undefined
+}
+
 export function AuditLogPage() {
   const scope = useScopeJournals()
   const allJournals = useSession((s) => s.journal) === 'ALL'
@@ -95,12 +107,13 @@ export function AuditLogPage() {
   const entries = useMemo(() => data?.entries ?? [], [data])
 
   const exportCsv = () => {
-    downloadCsv(`audit-log_${new Date().toISOString().slice(0, 10)}.csv`, [
+    const range = from || to ? `_${(from || 'start').replace(/[:T]/g, '-')}_to_${(to || 'now').replace(/[:T]/g, '-')}` : ''
+    downloadCsv(`audit-log_${new Date().toISOString().slice(0, 10)}${range}.csv`, [
       ['Time (IST)', 'Actor', 'Journal', 'Action', 'Category', 'Target', 'Old value', 'New value'],
       ...entries.map((e) => [formatDateTime(e.at), e.actor, e.journal, e.action, categoryLabel(e.action), e.target, e.oldValue?.replace(/\n/g, '; '), e.newValue?.replace(/\n/g, '; ')]),
     ])
     recordAudit({ journal: 'ALL', action: 'Exported audit log (CSV)', target: 'Audit log', newValue: `${entries.length} rows` })
-    toast.success(`Exported ${entries.length} audit entries.`)
+    toast.success(`Exported ${entries.length} audit entries${from || to ? ' for the selected date and time range' : ''}.`)
   }
 
   const columns: Column<AuditEntry>[] = [
@@ -139,11 +152,18 @@ export function AuditLogPage() {
               <SelectFilter label="Journal" value={journal} onChange={setJournal} options={[...JOURNAL_CODES.filter((c) => scope.includes(c)).map((c) => ({ value: c, label: c })), { value: 'ALL', label: 'All journals (platform)' }]} />
               <SelectFilter label="Actor" value={actor} onChange={setActor} options={(data?.actors ?? []).map((a) => ({ value: a, label: a }))} />
               <SelectFilter label="Type" value={category} onChange={setCategory} options={AUDIT_CATEGORIES.map((c) => ({ value: c.id, label: c.label }))} />
+              <select aria-label="Quick range" className="input !w-auto" value="" onChange={(e) => { const r = quickRange(e.target.value); if (r) { setFrom(r.from); setTo(r.to) } }}>
+                <option value="">Quick range…</option>
+                <option value="1h">Last hour</option>
+                <option value="24h">Last 24 hours</option>
+                <option value="today">Today</option>
+                <option value="7d">Last 7 days</option>
+              </select>
               <label className="flex items-center gap-1.5 text-xs text-muted">From
-                <input type="date" aria-label="From date" className="input !w-auto" value={from} max={to || undefined} onChange={(e) => setFrom(e.target.value)} />
+                <input type="datetime-local" aria-label="From date and time" className="input !w-auto" value={from} max={to || undefined} onChange={(e) => setFrom(e.target.value)} />
               </label>
               <label className="flex items-center gap-1.5 text-xs text-muted">To
-                <input type="date" aria-label="To date" className="input !w-auto" value={to} min={from || undefined} onChange={(e) => setTo(e.target.value)} />
+                <input type="datetime-local" aria-label="To date and time" className="input !w-auto" value={to} min={from || undefined} onChange={(e) => setTo(e.target.value)} />
               </label>
               {(journal || actor || category || from || to) && <button className="btn-ghost" onClick={() => { setJournal(''); setActor(''); setCategory(''); setFrom(''); setTo('') }}>Clear filters</button>}
             </>

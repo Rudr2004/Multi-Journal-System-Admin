@@ -12,6 +12,8 @@ import { Badge, JournalBadge } from '@/components/Badges'
 import { EmptyState, ErrorState } from '@/components/States'
 import { RelativeTime } from '@/components/Time'
 import { CHANGE_TYPE_META } from '@/mock/data/production'
+import { EditorNotesForMeCard } from './NotesCards'
+import { TemplatePopup } from '@/pages/production/TemplateDownload'
 import { LINK, PaperTable, StageChart, TableSkeleton, TitleCell } from './parts'
 
 export function AssociateDashboard() {
@@ -25,6 +27,7 @@ export function AssociateDashboard() {
 
   return (
     <div className="space-y-6">
+      <TemplatePopup journals={scope === 'ALL' ? journals : [scope]} />
       <section className="grid grid-cols-2 gap-4 md:grid-cols-4" aria-label="Key figures">
         <KpiCard label="Assigned to me" value={d?.assigned.length} icon={Factory} loading={loading} to="/production" />
         <KpiCard label="Due or overdue" value={d?.due.length} icon={AlertTriangle} loading={loading} tone={d?.due.length ? 'warning' : 'default'} to="/production" />
@@ -53,6 +56,8 @@ export function AssociateDashboard() {
             </SectionCard>
           </div>
 
+          <EditorNotesForMeCard userId={user.id} />
+
           <SectionCard title="Returned to production" flush>
             {loading ? <TableSkeleton rows={2} /> : d!.returned.length === 0
               ? <EmptyState icon={Undo2} title="Nothing returned" hint="When the Editor sends an article back, their note appears here." />
@@ -66,7 +71,7 @@ export function AssociateDashboard() {
                         <p>{note?.text ?? 'Open the workspace to read the note from the Editor.'}</p>
                         {note && <p className="mt-0.5 text-xs text-red-800"><RelativeTime value={note.at} /></p>}
                       </div>
-                      <DueChip value={paper.productionDue} />
+                      <DueChip value={paper.productionDue} showDate />
                     </li>
                   ))}
                 </ul>
@@ -77,7 +82,7 @@ export function AssociateDashboard() {
             <SectionCard title="Due and overdue" action={<Link to="/production" className={LINK}>Open queue</Link>} flush>
               {loading ? <TableSkeleton /> : d!.due.length === 0
                 ? <EmptyState icon={ClipboardCheck} title="Nothing is due" hint="Items due today or past their date show up here." />
-                : <PaperTable papers={d!.due.slice(0, 6)} showJournal={all} extraLabel="Due" extra={(p) => <DueChip value={p.productionDue} />} />}
+                : <PaperTable papers={d!.due.slice(0, 6)} showJournal={all} extraLabel="Due" extra={(p) => <DueChip value={p.productionDue} showDate />} />}
             </SectionCard>
 
             <SectionCard title="Correction work" action={<Link to="/post-publication" className={LINK}>Post Corrections</Link>} flush>
