@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { Bold, CalendarClock, Check, Heading2, ImagePlus, Italic, Link2, List, ListOrdered, Quote, RotateCcw, Save, Send, X } from 'lucide-react'
+import { Bold, CalendarClock, Check, ClipboardPaste, Code2, Eraser, FileCode2, Heading2, ImagePlus, Italic, Link2, List, ListOrdered, Quote, RotateCcw, Save, Send, Trash2, X } from 'lucide-react'
 import { Controller, useForm, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -27,6 +27,22 @@ import { Markdown } from '../Markdown'
 import { COVER_CLASS, fromLocalInput, toLocalInput } from '../shared'
 import { BlogStatusBadge, EDITABLE_BY_APPROVER, EDITABLE_BY_AUTHOR } from './parts'
 
+const STARTER_PAGE = `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Page title</title>
+<style>body{font-family:Georgia,serif;max-width:720px;margin:40px auto;padding:0 16px;color:#0f172a;line-height:1.7}h1{font-size:28px}a{color:#4f46e5}</style></head>
+<body>
+<h1>Page heading</h1>
+<p>Write or paste the content built in your external HTML tool.</p>
+</body>
+</html>`
+
+/** Scripts, inline handlers and javascript: links never reach the preview or the website. */
+const safeHtml = (html: string) => html
+  .replace(/<script[\s\S]*?<\/script>/gi, '')
+  .replace(/\son\w+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '')
+  .replace(/javascript:/gi, '')
+
 const schema = z.object({
   title: z.string().trim().min(3, 'Enter a title of at least 3 characters.').max(120, 'Keep the title under 120 characters.'),
   slug: z.string().min(1, 'Enter a URL address.').max(80, 'Keep the address under 80 characters.').regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, 'Use lowercase letters, numbers and single hyphens only.'),
@@ -36,10 +52,12 @@ const schema = z.object({
   metaDescription: z.string().max(160, 'Meta description must be 160 characters or fewer.'),
   keywords: z.string().max(200, 'Keep keywords under 200 characters.').refine((v) => v.split(',').filter((k) => k.trim()).length <= 10, 'Use at most 10 keywords.'),
   cover: z.enum(COVER_TONES),
+  coverImage: z.string().max(3_000_000).optional(),
+  format: z.enum(['markdown', 'html']).optional(),
 })
 
 const toDraft = (p: BlogPost): BlogDraft => ({
-  title: p.title, slug: p.slug, content: p.content, excerpt: p.excerpt, seoTitle: p.seoTitle, metaDescription: p.metaDescription, keywords: p.keywords, cover: p.cover,
+  title: p.title, slug: p.slug, content: p.content, excerpt: p.excerpt, seoTitle: p.seoTitle, metaDescription: p.metaDescription, keywords: p.keywords, cover: p.cover, coverImage: p.coverImage, format: p.format ?? 'markdown',
 })
 
 export default function BlogEditorPage() {
@@ -97,6 +115,18 @@ function Editor({ post }: { post: BlogPost }) {
   const [current, setCurrent] = useState(post)
   const [busy, setBusy] = useState(false)
   const [mode, setMode] = useState<'write' | 'preview'>('write')
+  const isHtml = values.format === 'html'
+  const coverImage = values.coverImage
+  const readCover = (f: File) => {
+    if (!/^image\/(png|jpe?g|webp)$/.test(f.type)) { toast.error('Choose a PNG, JPG or WebP image.'); return }
+    if (f.size > 2 * 1024 * 1024) { toast.error('The cover image must be under 2 MB.'); return }
+    const r = new FileReader()
+    r.onload = () => setValue('coverImage', String(r.result), { shouldDirty: true })
+    r.readAsDataURL(f)
+  }
+  const pasteHtml = async () => {
+    try { setValue('content', await navigator.clipboard.readText(), { shouldDirty: true }) } catch { toast.info('Paste is blocked here. Click in the box and press Ctrl+V.') }
+  }
   const [rejecting, setRejecting] = useState(false)
   const [publishing, setPublishing] = useState(false)
   const [scheduling, setScheduling] = useState(false)
@@ -211,14 +241,43 @@ function Editor({ post }: { post: BlogPost }) {
               <div>
                 <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
                   <span className="label !mb-0" id="content-label">Body</span>
+                  <div className="flex flex-wrap items-center gap-2">
+                  <div className="inline-flex rounded-lg bg-subtle p-0.5" role="group" aria-label="Body format">
+                    {([['markdown', 'Markdown', FileCode2], ['html', 'HTML page builder', Code2]] as const).map(([f, label, Icon]) => (
+                      <button key={f} type="button" aria-pressed={isHtml === (f === 'html')} onClick={() => setValue('format', f, { shouldDirty: true })}
+                        className={cn('inline-flex items-center gap-1 rounded-md px-3 py-1 text-xs font-medium', isHtml === (f === 'html') ? 'bg-surface text-ink shadow-sm' : 'text-muted hover:text-ink')}><Icon size={13} aria-hidden /> {label}</button>
+                    ))}
+                  </div>
                   <div className="inline-flex rounded-lg bg-subtle p-0.5" role="group" aria-label="Editor mode">
                     {(['write', 'preview'] as const).map((m) => (
                       <button key={m} type="button" aria-pressed={mode === m} onClick={() => setMode(m)}
                         className={cn('rounded-md px-3 py-1 text-xs font-medium capitalize', mode === m ? 'bg-surface text-ink shadow-sm' : 'text-muted hover:text-ink')}>{m}</button>
                     ))}
                   </div>
+                  </div>
                 </div>
-                {mode === 'write' ? (
+                {isHtml ? (
+                  mode === 'write' ? (
+                    <div className="rounded-lg border border-line focus-within:ring-2 focus-within:ring-accent">
+                      <div role="toolbar" aria-label="HTML page builder" className="flex flex-wrap items-center gap-2 border-b border-line bg-page px-2 py-1.5">
+                        <button type="button" className="btn-secondary !h-8" onClick={pasteHtml}><ClipboardPaste size={14} aria-hidden /> Paste HTML</button>
+                        <button type="button" className="btn-secondary !h-8" onClick={() => setValue('content', STARTER_PAGE, { shouldDirty: true })}><Code2 size={14} aria-hidden /> Starter page</button>
+                        <button type="button" className="btn-ghost !h-8" onClick={() => setValue('content', '', { shouldDirty: true })}><Eraser size={14} aria-hidden /> Clear</button>
+                        <span className="text-xs text-muted">Build the page in any external HTML tool, then paste the code here.</span>
+                      </div>
+                      <Controller control={control} name="content" render={({ field }) => (
+                        <textarea aria-labelledby="content-label" aria-invalid={!!errors.content} rows={18} value={field.value} onChange={field.onChange} onBlur={field.onBlur} spellCheck={false}
+                          placeholder="Paste or write the page HTML here. Use Preview to see the page."
+                          className="block w-full resize-y rounded-b-lg bg-surface p-3 font-mono text-xs leading-5 outline-none disabled:opacity-70" />
+                      )} />
+                      {/<script[\s>]|\son\w+\s*=|javascript:/i.test(values.content ?? '') && <p role="alert" className="border-t border-line bg-amber-50 px-3 py-2 text-xs text-amber-900">Scripts, inline event handlers and javascript: links are removed when the page is shown on the website.</p>}
+                    </div>
+                  ) : (
+                    <div className="overflow-hidden rounded-lg border border-line bg-white" aria-label="Page preview">
+                      {values.content?.trim() ? <iframe title="HTML page preview" sandbox="" srcDoc={safeHtml(values.content)} className="h-[28rem] w-full border-0" /> : <p className="p-4 text-sm text-muted">Nothing to preview yet. Paste some HTML first.</p>}
+                    </div>
+                  )
+                ) : mode === 'write' ? (
                   <div className="rounded-lg border border-line focus-within:ring-2 focus-within:ring-accent">
                     <div role="toolbar" aria-label="Formatting" className="flex flex-wrap gap-0.5 border-b border-line bg-page px-1.5 py-1">
                       {TOOLS.map((t) => (
@@ -313,14 +372,21 @@ function Editor({ post }: { post: BlogPost }) {
             <fieldset disabled={!canEdit}>
               <Controller control={control} name="cover" render={({ field }) => (
                 <div>
-                  <div className={cn('mb-3 flex h-28 items-center justify-center rounded-lg bg-gradient-to-br text-white', COVER_CLASS[field.value])} aria-label="Cover placeholder"><ImagePlus size={28} strokeWidth={1.5} aria-hidden /></div>
+                  {coverImage
+                    ? <img src={coverImage} alt="Cover preview" className="mb-3 h-28 w-full rounded-lg object-cover" />
+                    : <div className={cn('mb-3 flex h-28 items-center justify-center rounded-lg bg-gradient-to-br text-white', COVER_CLASS[field.value])} aria-label="Cover placeholder"><ImagePlus size={28} strokeWidth={1.5} aria-hidden /></div>}
+                  <div className="mb-3 flex flex-wrap gap-2">
+                    <label className="btn-secondary !h-8 cursor-pointer"><ImagePlus size={14} aria-hidden /> {coverImage ? 'Change image' : 'Upload image'}
+                      <input type="file" accept="image/png,image/jpeg,image/webp" className="sr-only" aria-label="Upload cover image" onChange={(e) => { const f = e.target.files?.[0]; if (f) readCover(f); e.target.value = '' }} /></label>
+                    {coverImage && <button type="button" className="btn-ghost !h-8 hover:!text-red-600" onClick={() => setValue('coverImage', undefined, { shouldDirty: true })}><Trash2 size={14} aria-hidden /> Remove</button>}
+                  </div>
                   <div role="radiogroup" aria-label="Cover colour" className="flex flex-wrap gap-2">
                     {COVER_TONES.map((t) => (
                       <button key={t} type="button" role="radio" aria-checked={field.value === t} aria-label={t} onClick={() => field.onChange(t)}
                         className={cn('h-7 w-7 rounded-full bg-gradient-to-br ring-offset-2 focus-visible:ring-2 focus-visible:ring-accent', COVER_CLASS[t], field.value === t && 'ring-2 ring-ink')} />
                     ))}
                   </div>
-                  <p className="mt-2 text-xs text-muted">Image upload comes later; a colour cover is used for now.</p>
+                  <p className="mt-2 text-xs text-muted">The colour is used when no image is uploaded.</p>
                 </div>
               )} />
             </fieldset>

@@ -1,5 +1,5 @@
 import { Link, useNavigate } from 'react-router-dom'
-import { ArrowRight, BookOpen, Info, Plus, Presentation, Rocket, Save } from 'lucide-react'
+import { ArrowRight, Info, Plus, Presentation, Save } from 'lucide-react'
 import { PageHeader } from '@/layout/PageHeader'
 import { Badge, JournalBadge, StatusBadge } from '@/components/Badges'
 import { SectionCard } from '@/components/Card'
@@ -101,13 +101,6 @@ export function ConferenceProductionDetail({ conferenceId }: { conferenceId: str
               { label: 'Organiser', value: c.organiser },
               { label: 'Camera-ready deadline', value: formatDate(c.cameraReadyDeadline) },
             ]} />
-          </SectionCard>
-          <SectionCard title="Proceedings issue">
-            <p className="mb-3 text-sm text-muted">{issue ? `${issue.label} is managed by the Editor.` : 'The Editor creates the proceedings issue once papers are published.'}</p>
-            <div className="flex flex-wrap gap-2">
-              <GuardedButton className="btn-secondary" allowed={false} why={noEdit}><BookOpen size={15} aria-hidden /> Create proceedings issue</GuardedButton>
-              <GuardedButton className="btn-primary" allowed={false} why="Only an Editor publishes proceedings."><Rocket size={15} aria-hidden /> Publish proceedings</GuardedButton>
-            </div>
           </SectionCard>
         </div>
       </div>
