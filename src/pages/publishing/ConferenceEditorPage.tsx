@@ -130,6 +130,7 @@ function ConferenceEditor({ detail, reload }: { detail: ConferenceDetail; reload
 
           <SectionCard title={`Linked submissions (${linked.length})`}
             action={<div className="flex flex-wrap gap-2">
+              {linked.length > 0 && <Link to={`/submissions?conference=${encodeURIComponent(c.shortName)}`} className="btn-secondary"><FileText size={15} strokeWidth={1.5} aria-hidden /> View in Manuscript Submissions</Link>}
               <GuardedButton className="btn-secondary" allowed={perm.can('manage')} why={perm.why('manage')} onClick={() => setLinking(true)}><Link2 size={15} strokeWidth={1.5} aria-hidden /> Link papers</GuardedButton>
             </div>} flush>
             {linked.length === 0 ? (

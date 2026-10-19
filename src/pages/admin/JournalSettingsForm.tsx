@@ -35,6 +35,8 @@ export const settingsSchema = z
     dispatchSlots: z.array(z.object({ label: z.string().trim().min(2, 'Name this slot.').max(40, 'Keep it under 40 characters.'), time })).min(1, 'Keep at least one dispatch slot.').max(4, 'At most 4 slots.'),
     supportStart: time,
     supportEnd: time,
+    firstDecision: z.string().trim().min(3, 'Enter the first decision time, e.g. Within 24 hours.').max(60, 'Keep it under 60 characters.'),
+    publicationTime: z.string().trim().min(3, 'Enter the publication time, e.g. Within 24 hours of acceptance.').max(80, 'Keep it under 80 characters.'),
     indexing: z.record(z.string(), z.boolean()),
     site: z.object({
       infoTable: z.array(z.object({ label, value: z.string().trim().min(1, 'Enter a value.').max(160, 'Keep the value under 160 characters.') })).max(15, 'At most 15 rows.'),
@@ -74,6 +76,7 @@ export const SETTINGS_SECTIONS = [
   { id: 'articleTypes', label: 'Article types' },
   { id: 'trust', label: 'Trust badges and ledger' },
   { id: 'cfp', label: 'Call for papers' },
+  { id: 'timelines', label: 'Review and publication times' },
   { id: 'paperId', label: 'Paper ID pattern' },
   { id: 'comms', label: 'WhatsApp and time slots' },
   { id: 'indexing', label: 'Indexing badges' },
@@ -297,6 +300,17 @@ export function JournalSettingsForm({ code, saved, draft, onDraft }: {
           <div className="mt-3 grid gap-4 md:grid-cols-[1fr_200px]">
             <FormField label="Call for papers text" error={err?.callForPapers?.text?.message}>{(a) => <textarea {...a} rows={3} className="input !h-auto py-2" {...register('site.callForPapers.text')} />}</FormField>
             <FormField label="Submission deadline" error={err?.callForPapers?.deadline?.message}>{(a) => <input {...a} type="date" className="input" {...register('site.callForPapers.deadline')} />}</FormField>
+          </div>
+        </SectionCard></Anchor>
+
+        <Anchor id="timelines"><SectionCard title="Review and publication times">
+          <div className="grid gap-4 md:grid-cols-2">
+            <FormField label="First decision" required error={errors.firstDecision?.message} hint="Shown to authors on the website, for example “Within 24 hours”.">
+              {(a) => <input {...a} className="input" maxLength={60} {...register('firstDecision')} />}
+            </FormField>
+            <FormField label="Publication" required error={errors.publicationTime?.message} hint="Shown to authors on the website, for example “Within 24 hours of acceptance”.">
+              {(a) => <input {...a} className="input" maxLength={80} {...register('publicationTime')} />}
+            </FormField>
           </div>
         </SectionCard></Anchor>
 

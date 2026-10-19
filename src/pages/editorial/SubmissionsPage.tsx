@@ -14,7 +14,7 @@ import { toast } from '@/components/Toasts'
 import { useIsAllJournals } from '@/lib/scope'
 import { useAsync } from '@/lib/useAsync'
 import { usePermission } from '@/permissions/hooks'
-import { formatDate } from '@/shared/formatters'
+import { formatDate, formatTime } from '@/shared/formatters'
 import { PIPELINE_STAGES, STATUS_META } from '@/shared/statuses'
 import type { Paper, PaperStatus, PaymentStatus } from '@/shared/types'
 import { assignAssignee, exportSubmissions, listAssignees, listSubmissions, type SubmissionRow } from '@/mock/api/papers'
@@ -80,7 +80,7 @@ export function SubmissionsPage() {
 
   const columns = useMemo<Column<SubmissionRow>[]>(() => {
     const cols: Column<SubmissionRow>[] = [
-      { id: 'submitted', header: 'Submission date', locked: true, sort: (r) => r.submittedAt, cell: (r) => <span className="whitespace-nowrap">{formatDate(r.submittedAt)}</span> },
+      { id: 'submitted', header: 'Submission date', locked: true, sort: (r) => r.submittedAt, cell: (r) => <span className="whitespace-nowrap">{formatDate(r.submittedAt)}<span className="block text-xs text-muted">{formatTime(r.submittedAt)} IST</span></span> },
       { id: 'id', header: 'Paper ID', sort: (r) => r.id, cell: (r) => <PaperIdLink id={r.id} to={paperStagePath(role, r)} /> },
       { id: 'title', header: 'Title', sort: (r) => r.title, className: 'min-w-[260px]', cell: (r) => <Link to={paperStagePath(role, r)} className="block hover:text-accent"><TitleText title={r.title} /></Link> },
     ]

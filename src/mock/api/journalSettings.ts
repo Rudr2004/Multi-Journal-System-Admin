@@ -28,6 +28,8 @@ export function diffSettings(a: JournalSettings, b: JournalSettings): { field: s
   add('GST details', 'GST state', a.gstState, b.gstState)
   add('WhatsApp number', 'WhatsApp', a.whatsapp, b.whatsapp)
   add('Time slots', 'Dispatch slots', slots(a), slots(b))
+  add('Review and publication timelines', 'First decision', a.firstDecision, b.firstDecision)
+  add('Review and publication timelines', 'Publication', a.publicationTime, b.publicationTime)
   add('Time slots', 'Support hours', `${a.supportStart}–${a.supportEnd}`, `${b.supportStart}–${b.supportEnd}`)
   const lv = (l: { label: string; value: string }[]) => l.map((x) => `${x.label}: ${x.value}`).join('; ') || 'None'
   const list = (l: string[]) => l.join(', ') || 'None'

@@ -10,6 +10,7 @@ import { useAsync } from '@/lib/useAsync'
 import { useIsAllJournals, useScopeJournals } from '@/lib/scope'
 import { useCurrentUser, usePermission } from '@/permissions/hooks'
 import { listProductionQueue, type QueueRow } from '@/mock/api/production'
+import { formatDate, formatTime } from '@/shared/formatters'
 import { STATUS_META } from '@/shared/statuses'
 import { usePapersKey } from './shared'
 import { TemplateCard } from './TemplateDownload'
@@ -36,6 +37,8 @@ export function ProductionQueuePage() {
     { id: 'press', header: 'Article In Press', cell: (r) => (r.inPress
       ? <Badge tone="info"><Newspaper size={12} aria-hidden /> In Press</Badge>
       : <span className="text-faint">Not yet listed</span>), sort: (r) => Number(r.inPress) },
+    { id: 'submitted', header: 'Submitted', cell: (r) => <span className="whitespace-nowrap">{formatDate(r.paper.submittedAt)}<span className="block text-xs text-muted">{formatTime(r.paper.submittedAt)} IST</span></span>, sort: (r) => r.paper.submittedAt },
+    { id: 'updated', header: 'Last updated', cell: (r) => <span className="whitespace-nowrap">{formatDate(r.paper.updatedAt)}<span className="block text-xs text-muted">{formatTime(r.paper.updatedAt)} IST</span></span>, sort: (r) => r.paper.updatedAt },
     { id: 'due', header: 'Due date', cell: (r) => (r.paper.status === 'ready_for_approval' ? <span className="text-faint">—</span> : <DueChip value={r.due} showDate />), sort: (r) => r.due },
   ]
 

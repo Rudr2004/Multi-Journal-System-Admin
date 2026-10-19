@@ -25,6 +25,8 @@ import { JOURNALS } from '@/mock/data/core'
 import type { JournalCode } from '@/shared/types'
 import { PAYOUT_MODE_LABEL, type PayoutMode, type ReferralStatus } from '@/mock/data/financeExtra'
 import { recordAudit } from '@/mock/actions'
+import { auditFlagChange } from '@/mock/api/journalSettings'
+import { useSession } from '@/mock/store'
 import { downloadCsv } from '@/pages/insights/csv'
 import { formatDate, formatMoney } from '@/shared/formatters'
 import type { Tone } from '@/shared/statuses'
@@ -54,6 +56,13 @@ export function ReferralsPage() {
   const journals = useScopeJournals()
   const all = useIsAllJournals()
   const perm = usePermission('referrals')
+  const on = useSession((s) => s.flags.referralSystem)
+  const setFlag = useSession((s) => s.setFlag)
+  const toggle = (next: boolean) => {
+    setFlag('referralSystem', next)
+    auditFlagChange('referralSystem', next)
+    toast.success(next ? 'Referral system resumed. The referral code field and referral details are shown on the website again.' : 'Referral system paused. The referral code field and referral details are hidden on the website. Existing records are kept.')
+  }
   const [f, setF] = useState({ status: '', referrer: '' })
   const [paying, setPaying] = useState<ReferralRow[] | null>(null)
   const [cancelling, setCancelling] = useState<ReferralRow | null>(null)
@@ -132,6 +141,15 @@ export function ReferralsPage() {
           <GuardedButton className="btn-secondary" allowed={perm.can('manage')} why={perm.why('manage')} onClick={() => setPricing(true)}><SlidersHorizontal size={15} strokeWidth={1.5} aria-hidden /> Referral amount</GuardedButton>
           <button className="btn-secondary" disabled={rows.length === 0} onClick={() => exportCsv(rows)}><Download size={15} strokeWidth={1.5} aria-hidden /> Export CSV</button>
         </>} />
+      <section aria-label="Referral system switch" className={`mb-5 flex flex-wrap items-center justify-between gap-3 rounded-lg border px-4 py-3 ${on ? 'border-line bg-surface' : 'border-amber-300 bg-amber-50'}`}>
+        <div className="min-w-0">
+          <p className="flex items-center gap-2 text-sm font-semibold">Referral system <Badge tone={on ? 'success' : 'warning'}>{on ? 'On' : 'Paused'}</Badge></p>
+          <p className="mt-0.5 max-w-3xl text-xs text-muted">{on
+            ? 'Authors see the referral code field on the submission form, and the referral details on Track Status.'
+            : 'Paused: the referral code field is hidden on the submission form and referral details are hidden on Track Status. Existing credits, payouts and referral data are kept, and nothing is deleted. Resume to show them again.'}</p>
+        </div>
+        <Switch label={on ? 'Referral system is on' : 'Referral system is paused'} checked={on} disabled={!perm.can('manage')} onChange={toggle} />
+      </section>
       <section aria-label="Referral summary" className="mb-5 grid grid-cols-2 gap-4 md:grid-cols-4">
         <KpiCard label="Pending" value={formatMoney(total('pending'), 'INR')} hint={`${n('pending')} credit${n('pending') === 1 ? '' : 's'} · paper not published yet`} icon={Clock} loading={first} />
         <KpiCard label="Eligible — to pay out" value={formatMoney(total('eligible'), 'INR')} hint={`${n('eligible')} credit${n('eligible') === 1 ? '' : 's'} · paper published`} icon={Wallet} tone={n('eligible') ? 'warning' : 'default'} loading={first} />

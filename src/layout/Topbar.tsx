@@ -1,4 +1,4 @@
-import { Bell, CircleHelp, LogOut, Menu, RotateCcw, Rows3, Rows4, Search, Send } from 'lucide-react'
+import { Bell, CircleHelp, LogOut, Menu, RotateCcw, Rows3, Rows4, Search, Send, ShieldCheck } from 'lucide-react'
 import { useMemo } from 'react'
 import { resetAll } from '@/mock/reset'
 import { toast } from '@/components/Toasts'
@@ -140,6 +140,7 @@ function UserMenu() {
 export function Topbar() {
   const setPalette = useUi((s) => s.setPalette)
   const setMobileNav = useUi((s) => s.setMobileNav)
+  const role = useRole()
   return (
     <header className="flex h-14 shrink-0 items-center gap-2 border-b border-line bg-surface px-4">
       <button aria-label="Open navigation" className="btn-ghost h-9 w-9 px-0 lg:hidden" onClick={() => setMobileNav(true)}><Menu size={18} strokeWidth={1.5} /></button>
@@ -151,6 +152,11 @@ export function Topbar() {
       </button>
       <button aria-label="Search" className="btn-ghost h-9 w-9 px-0 sm:hidden" onClick={() => setPalette(true)}><Search size={18} strokeWidth={1.5} /></button>
       <div className="ml-auto flex items-center gap-1">
+        {(role === 'reviewer' || role === 'panel_member') && (
+          <span className="mr-1 inline-flex shrink-0 items-center gap-1.5 rounded-full border border-green-300 bg-green-50 px-2.5 py-1 text-xs font-semibold text-green-800" title="Authors and reviewers stay anonymous to each other throughout peer review.">
+            <ShieldCheck size={14} aria-hidden /><span className="whitespace-nowrap"><span className="hidden md:inline">Double Blind Peer Review (Anonymous)</span><span className="md:hidden">Double blind</span></span>
+          </span>
+        )}
         <DispatchIndicator />
         <Notifications />
         <HelpMenu />

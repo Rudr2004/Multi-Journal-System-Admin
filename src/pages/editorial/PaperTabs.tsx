@@ -79,7 +79,7 @@ export function OverviewTab({ paper, detail }: { paper: Paper; detail: PaperDeta
       <SectionCard title="Submission details">
         <DescriptionList cols={3} items={[
           { label: 'Article type', value: paper.articleType },
-          { label: 'Submitted', value: formatDate(paper.submittedAt) },
+          { label: 'Submitted', value: formatDateTime(paper.submittedAt) },
           { label: 'Manuscript length', value: `${detail.wordCount.toLocaleString('en-IN')} words` },
           { label: 'Author country', value: paper.authorCountry },
           { label: 'Conference', value: detail.conference },

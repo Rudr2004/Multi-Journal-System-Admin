@@ -18,6 +18,8 @@ export interface FeatureFlags {
   websiteChat: boolean
   /** SEO keyword auto-linking. */
   seoAutoLink: boolean
+  /** Referral system. Off = paused: no referral code on the submission form and no referral details on Track Status (existing records are kept). */
+  referralSystem: boolean
   /** Reviewers can see all submissions in their subject (client sheet says "show all submissions" — to confirm). */
   reviewerSeesAll: boolean
 }
@@ -30,6 +32,7 @@ export const DEFAULT_FLAGS: FeatureFlags = {
   websiteChat: true,
   seoAutoLink: true,
   reviewerSeesAll: false,
+  referralSystem: true,
 }
 
 export type FlagBadge = 'Proposed' | 'Under discussion' | 'To confirm'
@@ -41,6 +44,7 @@ export const FLAG_META: Record<keyof FeatureFlags, { label: string; description:
   emailInbox: { label: 'Email in Communication Inbox', description: 'Show the Mail channel next to WhatsApp.', badge: 'Proposed' },
   websiteChat: { label: 'Website chat in Communication Inbox', description: 'Show the Chat channel from the journal websites.', badge: 'Proposed' },
   seoAutoLink: { label: 'SEO keyword auto-linking', description: 'Link chosen keywords to articles or subject pages automatically.', badge: 'Proposed' },
+  referralSystem: { label: 'Referral system', description: 'Switch off to pause referrals: the referral code field and referral details are hidden on the website. Existing referral records are kept.', badge: 'Proposed' },
   reviewerSeesAll: { label: 'Reviewers see all submissions in their subject', description: 'Read-only view beyond assigned papers. Off until confirmed.', badge: 'To confirm' },
 }
 

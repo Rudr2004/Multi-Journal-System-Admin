@@ -23,6 +23,10 @@ export interface JournalSettings {
   dispatchSlots: DispatchSlot[]
   supportStart: string
   supportEnd: string
+  /** Shown on the website's call for papers and submit page, e.g. "Within 24 hours". */
+  firstDecision: string
+  /** Shown on the website, e.g. "Within 24 hours of acceptance". */
+  publicationTime: string
   /** Indexing badges shown in the website footer / journal header, by service id. */
   indexing: Record<string, boolean>
   /** Everything the journal website shows that is not a fee or an ID: contact, subjects, trust and call for papers. */
@@ -163,6 +167,8 @@ export function buildJournalSettings(): Record<JournalCode, JournalSettings> {
       ],
       supportStart: '10:00',
       supportEnd: '18:00',
+      firstDecision: 'Within 24 hours',
+      publicationTime: 'Within 24 hours of acceptance',
       site: buildSite(j.code, i),
       indexing: { scholar: true, crossref: true, doaj: i % 2 === 0, scopus: false, wos: false, ugc: i === 2 || i === 4, base: true, openaire: i < 3 },
     }

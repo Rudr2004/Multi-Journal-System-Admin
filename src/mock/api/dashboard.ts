@@ -42,9 +42,10 @@ function revenue(papers: Paper[]) {
   return { inr, usd }
 }
 
-export async function getAdminOverview(scope: JournalScope, allowed: JournalCode[]): Promise<AdminOverview> {
+export async function getAdminOverview(scope: JournalScope, allowed: JournalCode[], range?: DateRange): Promise<AdminOverview> {
   const ok = inScope(scope, allowed)
-  const papers = useDataStore.getState().papers.filter((p) => ok(p.journal))
+  const ranged = !!(range?.from || range?.to)
+  const papers = useDataStore.getState().papers.filter((p) => ok(p.journal) && inRange(p.submittedAt, range))
   const rev = revenue(papers)
   const dispatchItems = papers.filter((p) => p.dispatchAt)
   const actionFor: Partial<Record<PaperStatus, string>> = {
@@ -58,12 +59,12 @@ export async function getAdminOverview(scope: JournalScope, allowed: JournalCode
     .map((paper) => ({ paper, action: actionFor[paper.status] ?? 'Review' }))
   return delay({
     kpis: {
-      newSubmissions: papers.filter((p) => differenceInCalendarDays(NOW, parseISO(p.submittedAt)) <= 7).length,
+      newSubmissions: ranged ? papers.length : papers.filter((p) => differenceInCalendarDays(NOW, parseISO(p.submittedAt)) <= 7).length,
       awaitingDecision: count(papers, 'decision_pending'),
       awaitingPayment: count(papers, 'payment_pending', 'accepted'),
       inProduction: count(papers, 'in_production', 'returned_to_production', 'paid'),
       readyToPublish: count(papers, 'ready_for_approval'),
-      publishedThisMonth: papers.filter((p) => ['published', 'indexed', 'corrected'].includes(p.status) && isSameMonth(parseISO(p.updatedAt), NOW)).length,
+      publishedThisMonth: papers.filter((p) => ['published', 'indexed', 'corrected'].includes(p.status) && (ranged || isSameMonth(parseISO(p.updatedAt), NOW))).length,
       revenueInr: rev.inr,
       revenueUsd: rev.usd,
     },
@@ -101,9 +102,13 @@ export interface EditorOverview {
   total: number
 }
 
-/** Inclusive date range (YYYY-MM-DD). Papers are matched on their submission date. */
+/** Inclusive range. Each end is a date (YYYY-MM-DD, whole day) or a date with time (YYYY-MM-DDTHH:mm, local time). Papers are matched on their submission time. */
 export interface DateRange { from?: string; to?: string }
-const inRange = (iso: string, r?: DateRange) => { const d = iso.slice(0, 10); return (!r?.from || d >= r.from) && (!r?.to || d <= r.to) }
+const bound = (v: string, end: boolean) => new Date(v.length <= 10 ? `${v}T${end ? '23:59:59.999' : '00:00:00'}` : end ? `${v}:59.999` : v).getTime()
+export const inRange = (iso: string, r?: DateRange) => {
+  const t = new Date(iso).getTime()
+  return (!r?.from || t >= bound(r.from, false)) && (!r?.to || t <= bound(r.to, true))
+}
 
 export async function getEditorOverview(scope: JournalScope, allowed: JournalCode[], range?: DateRange): Promise<EditorOverview> {
   const ok = inScope(scope, allowed)

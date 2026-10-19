@@ -5,7 +5,7 @@ import { JournalBadge, StatusBadge } from '@/components/Badges'
 import { ErrorState, Skeleton } from '@/components/States'
 import { Tabs, type TabDef } from '@/components/Tabs'
 import { useAsync } from '@/lib/useAsync'
-import { formatDate, formatTime } from '@/shared/formatters'
+import { formatDate, formatDateTime, formatTime } from '@/shared/formatters'
 import { doiFor } from '@/shared/paperId'
 import { STATUS_META } from '@/shared/statuses'
 import { getPaperDetail } from '@/mock/api/papers'
@@ -98,7 +98,7 @@ export function PaperDetailPage() {
         <dl className="mt-3 flex flex-wrap gap-x-8 gap-y-2 text-sm">
           <div><dt className="inline text-muted">Author </dt><dd className="inline font-medium">{paper.author}</dd></div>
           <div><dt className="inline text-muted">Assignee </dt><dd className="inline font-medium">{assignee?.name ?? 'Unassigned'}</dd></div>
-          <div><dt className="inline text-muted">Submitted </dt><dd className="inline font-medium">{formatDate(paper.submittedAt)}</dd></div>
+          <div><dt className="inline text-muted">Submitted </dt><dd className="inline font-medium">{formatDateTime(paper.submittedAt)}</dd></div>
           {hasDoi && (
             <div className="flex items-center gap-1">
               <dt className="text-muted">DOI </dt>

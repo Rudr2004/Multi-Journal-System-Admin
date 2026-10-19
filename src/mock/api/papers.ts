@@ -1,5 +1,5 @@
 import type { Author, JournalCode, MessageLogEntry, Paper, StaffUser } from '@/shared/types'
-import { formatDate, formatTime } from '@/shared/formatters'
+import { formatDate, formatDateTime, formatTime } from '@/shared/formatters'
 import type { Level } from '@/permissions/matrix'
 import { currentActor, getAuthors, logEvent, recordAudit, sendMessage, updatePaper } from '../actions'
 import { nextDispatch } from '../data/papers'
@@ -33,11 +33,6 @@ export interface SubmissionRow extends Paper {
 }
 
 /** The conference a paper belongs to: a real link made in Conference Proceedings wins over the demo label. */
-/** Papers linked to a conference are handled under Conference Proceedings. */
-function isConferencePaper(id: string) {
-  return Object.values(usePublishingStore.getState().links).some((ids) => ids.includes(id))
-}
-
 function conferenceNameFor(p: Paper) {
   const { conferences, links } = usePublishingStore.getState()
   const id = Object.keys(links).find((k) => links[k].includes(p.id))
@@ -48,7 +43,7 @@ export const listSubmissions = (ctx: AccessCtx) =>
   delay(
     useDataStore
       .getState()
-      .papers.filter((p) => visible(p, ctx) && !isConferencePaper(p.id))
+      .papers.filter((p) => visible(p, ctx))
       .map<SubmissionRow>((p) => ({ ...p, conference: conferenceNameFor(p), subjects: paperSubjects(p) }))
       .sort((a, b) => b.submittedAt.localeCompare(a.submittedAt)),
   )
@@ -180,8 +175,8 @@ export async function resendMessage(messageId: string) {
 const csvCell = (v: string | number | undefined) => `"${String(v ?? '').replace(/"/g, '""')}"`
 
 export function submissionsToCsv(rows: SubmissionRow[]) {
-  const head = ['Paper ID', 'Journal', 'Title', 'Author', 'Author email', 'Article type', 'Status', 'Payment', 'Conference', 'Submitted']
-  const lines = rows.map((r) => [r.id, r.journal, r.title, r.author, r.authorEmail, r.articleType, r.status, r.paymentStatus, r.conference, formatDate(r.submittedAt)].map(csvCell).join(','))
+  const head = ['Paper ID', 'Journal', 'Title', 'Author', 'Author email', 'Article type', 'Status', 'Payment', 'Conference', 'Submitted (date and time)']
+  const lines = rows.map((r) => [r.id, r.journal, r.title, r.author, r.authorEmail, r.articleType, r.status, r.paymentStatus, r.conference, formatDateTime(r.submittedAt)].map(csvCell).join(','))
   return [head.map(csvCell).join(','), ...lines].join('\n')
 }
 
