@@ -14,7 +14,7 @@ import { useCurrentUser, usePermission } from '@/permissions/hooks'
 import { useDataStore } from '@/mock/store'
 import { getConferenceProduction, listConferenceProduction, type ConferenceProduction, type ConferenceProductionRow } from '@/mock/api/conferences'
 import { conferenceStatus } from '@/mock/data/publishing'
-import { formatDate } from '@/shared/formatters'
+import { formatDate, formatTime } from '@/shared/formatters'
 
 const NOTE = 'Conference papers go through the same production steps as other articles. Open the production workspace, complete it, then use Send for final approval there. Editors manage conferences, linked submissions and proceedings issues.'
 
@@ -26,6 +26,8 @@ const paperColumns = (): Column<ConferenceProductionRow>[] => [
     </div>
   ) },
   { id: 'status', header: 'Status', cell: (r) => <StatusBadge status={r.paper.status} /> },
+  { id: 'submitted', header: 'Submitted', sort: (r) => r.paper.submittedAt, cell: (r) => <span className="whitespace-nowrap">{formatDate(r.paper.submittedAt)}<span className="block text-xs text-muted">{formatTime(r.paper.submittedAt)} IST</span></span> },
+  { id: 'updated', header: 'Last updated', sort: (r) => r.paper.updatedAt, cell: (r) => <span className="whitespace-nowrap">{formatDate(r.paper.updatedAt)}<span className="block text-xs text-muted">{formatTime(r.paper.updatedAt)} IST</span></span> },
   { id: 'due', header: 'Due', cell: (r) => (r.paper.status === 'ready_for_approval' ? <Badge tone="accent">With the Editor</Badge> : <DueChip value={r.due} />) },
   { id: 'checks', header: 'Checklist', cell: (r) => (r.paper.status === 'ready_for_approval' ? <Badge tone="success">Complete</Badge> : r.missing === 0 ? <Badge tone="success">Ready to send</Badge> : <Badge tone="warning">{r.missing} open</Badge>) },
   { id: 'open', header: '', cell: (r) => <Link to={`/production/${r.paper.id}`} className="inline-flex items-center gap-1 whitespace-nowrap text-accent hover:underline">{r.paper.status === 'ready_for_approval' ? 'View workspace' : 'Open workspace'} <ArrowRight size={13} aria-hidden /></Link> },

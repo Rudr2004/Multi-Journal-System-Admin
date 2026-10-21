@@ -64,8 +64,8 @@ function Detail({ detail }: { detail: ChangeDetail }) {
   const perm = usePermission('postPub')
   const user = useCurrentUser()
   const feeOn = useSession((s) => s.flags.correctionFee)
-  const isAe = perm.role === 'associate_editor'
-  const isSupport = perm.role === 'support'
+  const isAe = perm.role === 'ASSOCIATE_EDITOR'
+  const isSupport = perm.role === 'SUPPORT_EXECUTIVE'
   const canApprove = perm.can('approve')
   const canEdit = isAe && r.assigneeId === user?.id
   const users = useDataStore((s) => s.users)

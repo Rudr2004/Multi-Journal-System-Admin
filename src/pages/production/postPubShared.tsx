@@ -31,6 +31,6 @@ export const FeeBadge = ({ fee }: { fee?: ChangeFee }) => (fee ? <Badge tone={FE
 /** Who may raise a request: Support Executives (their job) and anyone who approves or manages corrections. */
 export function useCanRaise() {
   const perm = usePermission('postPub')
-  const can = perm.role === 'support' || perm.can('approve')
+  const can = perm.role === 'SUPPORT_EXECUTIVE' || perm.can('approve')
   return { can, why: can ? undefined : 'Only Support Executives raise correction requests. Your role works on approved requests.' }
 }

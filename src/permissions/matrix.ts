@@ -86,7 +86,7 @@ const TABLE: Record<Area, Row> = {
   audit: [M, N, N, N, N, N],
 }
 
-const COLS: Role[] = ['super_admin', 'editor', 'associate_editor', 'reviewer', 'panel_member', 'support']
+const COLS: Role[] = ['SUPER_ADMIN', 'EDITOR', 'ASSOCIATE_EDITOR', 'REVIEWER', 'REVIEW_PANEL_MEMBER', 'SUPPORT_EXECUTIVE']
 
 export const PERMISSION_MATRIX: Record<Area, Record<Role, Level>> = Object.fromEntries(
   (Object.keys(TABLE) as Area[]).map((area) => [
@@ -97,4 +97,9 @@ export const PERMISSION_MATRIX: Record<Area, Record<Role, Level>> = Object.fromE
 
 export function levelFor(role: Role | undefined, area: Area): Level {
   return role ? PERMISSION_MATRIX[area][role] : 'none'
+}
+
+/** Several roles in one journal add up: the highest level of any of them applies. */
+export function levelForRoles(roles: readonly Role[], area: Area): Level {
+  return roles.reduce<Level>((best, r) => (LEVEL_RANK[levelFor(r, area)] > LEVEL_RANK[best] ? levelFor(r, area) : best), 'none')
 }

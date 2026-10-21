@@ -1,200 +1,214 @@
 import { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { ArrowLeft, Ban, KeyRound, Mail, Pencil, Play, UserX } from 'lucide-react'
+import { ArrowLeft, Ban, KeyRound, LogOut, Mail, Pencil, Play, Plus, ShieldCheck, ShieldOff, Smartphone, Trash2 } from 'lucide-react'
 import { PageHeader } from '@/layout/PageHeader'
 import { useAsync } from '@/lib/useAsync'
-import { useCurrentUser, usePermission } from '@/permissions/hooks'
+import { usePermission } from '@/permissions/hooks'
 import { Badge } from '@/components/Badges'
 import { SectionCard } from '@/components/Card'
-import { ConfirmDialog, Dialog } from '@/components/Dialog'
+import { ConfirmDialog } from '@/components/Dialog'
 import { DescriptionList } from '@/components/Form'
-import { ErrorState, Skeleton } from '@/components/States'
+import { ReasonDialog } from '@/components/ReasonDialog'
+import { EmptyState, ErrorState, Skeleton } from '@/components/States'
 import { GuardedButton } from '@/components/Tooltip'
 import { RelativeTime } from '@/components/Time'
-import { Timeline } from '@/components/Timeline'
 import { toast } from '@/components/Toasts'
-import { formatDateTime } from '@/shared/formatters'
-import { changeUserStatus, getUser, hasExpertiseRole, resendInvitation, resetUserAccess, updateAssignments, updateExpertise, type StatusAction } from '@/mock/api/users'
-import { categoryLabel } from '@/mock/api/audit'
-import { ExpertiseChips, ExpertisePicker, RoleChips, RoleMatrix, CopyField, UserStatusBadge, type Assignments } from './userUi'
+import { errorMessage } from '@/lib/api/errors'
+import { reloadMe } from '@/lib/api/session'
+import {
+  REASON_MAX, REASON_MIN, disableStaff, enableStaff, forcePasswordReset, getStaff, grantRole, listStaffSessions, resendInvite, resetStaffMfa, revokeRole, revokeStaffSessions, setSuperAdmin,
+} from '@/lib/api/staff'
+import type { GrantableRole } from '@/lib/api/types'
+import { formatDate, formatDateTime } from '@/shared/formatters'
+import { useSession } from '@/mock/store'
+import { EditStaffDialog, GrantRoleDialog } from './StaffDialogs'
+import { JournalTag, StaffStatusBadge, describeStaffError, roleLabel } from './staffUi'
 
-import { ChangePasswordDialog } from './ChangePasswordDialog'
+type Dialog =
+  | { kind: 'edit' | 'grant' | 'superAdmin' | 'disable' | 'enable' | 'resend' | 'revokeSessions' | 'forceReset' | 'mfaReset' }
+  | { kind: 'revoke'; grantId: string; role: string; journalCode: string }
 
-const messageOf = (e: unknown) => (e instanceof Error ? e.message : 'Something went wrong. Try again.')
+const reasonProps = { minLength: REASON_MIN, maxLength: REASON_MAX, placeholder: 'Why? It is recorded in the audit log.' } as const
 
+/** One person: roles per journal, sessions, and every Super Admin action on the account. */
 export function UserDetailPage() {
   const { userId = '' } = useParams()
   const perm = usePermission('users')
-  const me = useCurrentUser()
-  const { data, loading, error, reload } = useAsync(() => getUser(userId), [userId])
-  const [editing, setEditing] = useState(false)
-  const [editingExp, setEditingExp] = useState(false)
-  const [confirm, setConfirm] = useState<StatusAction | 'reset' | null>(null)
-  const [changingPassword, setChangingPassword] = useState(false)
-  const [link, setLink] = useState<{ title: string; text: string; url: string } | null>(null)
+  const myId = useSession((s) => s.userId)
+  const person = useAsync(() => getStaff(userId), [userId])
+  const sessions = useAsync(() => listStaffSessions(userId), [userId])
+  const [dialog, setDialog] = useState<Dialog | null>(null)
+  const close = () => setDialog(null)
 
   const back = <Link to="/users" className="btn-secondary"><ArrowLeft size={15} strokeWidth={1.5} aria-hidden /> All users</Link>
-  if (error) {
+  const p = person.data
+  if (!p) {
     return (
       <>
-        <PageHeader title="User Management" crumbs={[{ label: userId }]} actions={back} />
-        <div className="card"><ErrorState message={error.message} onRetry={reload} /></div>
+        <PageHeader title="User Management" crumbs={[{ label: 'Staff member' }]} actions={back} />
+        {person.error
+          ? <div className="card"><ErrorState message={describeStaffError(person.error).message} onRetry={person.reload} /></div>
+          : <div className="grid gap-4 lg:grid-cols-3" aria-busy="true"><Skeleton className="h-56 lg:col-span-2" /><Skeleton className="h-56" /></div>}
       </>
     )
   }
-  const u = data?.user
-  const isSelf = !!u && u.id === me?.id
-  const manage = perm.can('manage')
-  const selfWhy = isSelf ? 'You cannot change the status of your own account.' : undefined
-  const pending = !!u?.invite && !u.invite.acceptedAt
 
-  const runStatus = async (action: StatusAction) => {
-    if (!u) return
+  const reloadAll = () => { person.reload(); sessions.reload() }
+  const manage = perm.can('manage')
+  const isSelf = p.id === myId
+  const selfWhy = 'You cannot do this to your own account. Ask another Super Admin.'
+  const why = (extra?: string) => extra ?? perm.why('manage')
+
+  /** Runs a change. A rejection carries a readable sentence for the dialog; outdated data is refreshed. `touchesRoles` re-reads the signed-in person when it is them. */
+  const act = async (run: () => Promise<unknown>, success: string, touchesRoles = false) => {
     try {
-      await changeUserStatus(u.id, action)
-      toast.success(action === 'suspend' ? `${u.name} is suspended and signed out.` : action === 'reactivate' ? `${u.name} can sign in again.` : `${u.name} was deactivated.`)
-      reload()
-    } catch (e) { toast.error(messageOf(e)) }
+      await run()
+    } catch (e) {
+      const d = describeStaffError(e)
+      if (d.reload) reloadAll()
+      throw new Error(d.message, { cause: e })
+    }
+    toast.success(success)
+    reloadAll()
+    if (touchesRoles && isSelf) void reloadMe().catch((e: unknown) => toast.error(errorMessage(e)))
   }
-  const runReset = async () => {
-    if (!u) return
-    try {
-      const { link: url } = await resetUserAccess(u.id)
-      setLink({ title: 'Access reset', text: `${u.name} was signed out everywhere and must set a new password and re-enrol 2-step. A reset link was emailed to ${u.email}.`, url })
-      reload()
-    } catch (e) { toast.error(messageOf(e)) }
-  }
-  const resend = async () => {
-    if (!u) return
-    try {
-      const { link: url } = await resendInvitation(u.id)
-      setLink({ title: 'Invitation resent', text: `A reminder was queued to ${u.email}.`, url })
-    } catch (e) { toast.error(messageOf(e)) }
-  }
+  // Dialogs that take no reason close first, so their failures surface as toasts.
+  const fire = (run: () => Promise<unknown>, success: string) => { void act(run, success).catch((e: Error) => toast.error(e.message)) }
+
+  const activeSince = (iso: string) => <span title={formatDateTime(iso)}>{formatDate(iso)}</span>
+  const locked = p.lockedUntil && new Date(p.lockedUntil) > new Date() ? p.lockedUntil : null
 
   return (
     <>
-      <PageHeader title={u?.name ?? 'User'} description={u ? `${u.title} · ${u.email}` : undefined} crumbs={[{ label: u?.name ?? userId }]} actions={back} />
-      {loading || !u ? (
-        <div className="grid gap-4 lg:grid-cols-3" aria-busy="true"><Skeleton className="h-56 lg:col-span-2" /><Skeleton className="h-56" /></div>
-      ) : (
-        <div className="grid gap-4 lg:grid-cols-3">
-          <div className="space-y-4 lg:col-span-2">
-            <SectionCard title="Journals & roles" action={
-              <GuardedButton allowed={manage} why={perm.why('manage')} onClick={() => setEditing(true)}><Pencil size={14} strokeWidth={1.5} aria-hidden /> Edit assignments</GuardedButton>
-            }>
-              <RoleChips assignments={u.assignments} />
-              <p className="mt-3 text-xs text-muted">The person only sees the journals listed here, and only the modules their role allows in each one.</p>
-            </SectionCard>
-
-            {hasExpertiseRole(u.assignments) && (
-              <SectionCard title="Reviewer expertise areas" action={
-                <GuardedButton allowed={manage} why={perm.why('manage')} onClick={() => setEditingExp(true)}><Pencil size={14} strokeWidth={1.5} aria-hidden /> Edit expertise</GuardedButton>
-              }>
-                <ExpertiseChips tags={u.expertise} />
-                <p className="mt-3 text-xs text-muted">Editors see these when matching a paper’s subjects to a Reviewer or Review Panel Member.</p>
-              </SectionCard>
+      <PageHeader title={p.fullName} description={p.email} crumbs={[{ label: p.fullName }]} actions={back} />
+      <div className="grid items-start gap-4 lg:grid-cols-3" aria-busy={person.loading}>
+        <div className="space-y-4 lg:col-span-2">
+          <SectionCard title="Journals & roles" action={
+            <GuardedButton allowed={manage} why={why()} onClick={() => setDialog({ kind: 'grant' })}><Plus size={14} strokeWidth={1.5} aria-hidden /> Grant role</GuardedButton>
+          }>
+            {p.isSuperAdmin && (
+              <p className="mb-3 flex flex-wrap items-center gap-2 text-sm"><Badge tone="accent">Super Admin</Badge><span className="text-muted">Full access to every journal and to staff management.</span></p>
             )}
+            {p.journals.length === 0 ? (
+              <EmptyState title="No journal roles" hint={p.isSuperAdmin ? 'This person works as a Super Admin only.' : 'They cannot work in any journal until a role is granted.'} />
+            ) : (
+              <ul className="divide-y divide-line">
+                {p.journals.map((j) => (
+                  <li key={j.journalCode} className="py-3 first:pt-0 last:pb-0">
+                    <p className="mb-2 flex items-center gap-2 text-sm font-medium"><JournalTag code={j.journalCode} /><span className="text-muted">{j.journalName}</span></p>
+                    <ul className="space-y-1.5">
+                      {j.roles.map((r) => (
+                        <li key={r.id} className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                          <span><span className="font-medium">{roleLabel(r.role)}</span> <span className="text-muted">· since {activeSince(r.grantedAt)}{r.grantReason ? ` · “${r.grantReason}”` : ''}</span></span>
+                          <GuardedButton allowed={manage} why={why()} className="btn-ghost !h-8 text-red-700" aria-label={`Revoke ${roleLabel(r.role)} in ${j.journalCode}`}
+                            onClick={() => setDialog({ kind: 'revoke', grantId: r.id, role: roleLabel(r.role), journalCode: j.journalCode })}>
+                            <Trash2 size={14} strokeWidth={1.5} aria-hidden /> Revoke
+                          </GuardedButton>
+                        </li>
+                      ))}
+                    </ul>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </SectionCard>
 
-            <SectionCard title="Activity">
-              <Timeline
-                empty="No recorded activity for this user yet."
-                items={(data?.activity ?? []).map((a) => ({
-                  id: a.id, at: a.at, actor: a.actor,
-                  text: `· ${a.action}: ${a.target}${a.journal !== 'ALL' ? ` (${a.journal})` : ''} — ${categoryLabel(a.action)}`,
-                }))}
-              />
-            </SectionCard>
-          </div>
-
-          <div className="space-y-4">
-            <SectionCard title="Account">
-              <DescriptionList cols={1} items={[
-                { label: 'Status', value: <UserStatusBadge user={u} /> },
-                { label: 'Two-step sign-in', value: u.twoStep ? <Badge tone="success">On</Badge> : <Badge>Off</Badge> },
-                { label: 'Last active', value: u.lastActive ? <span title={formatDateTime(u.lastActive)}><RelativeTime value={u.lastActive} /></span> : 'Never signed in' },
-                ...(u.invite ? [{ label: 'Invited', value: <span>{formatDateTime(u.invite.invitedAt)} by {u.invite.invitedBy}{u.invite.acceptedAt ? ' · accepted' : ' · not accepted yet'}</span> }] : []),
-              ]} />
-              {pending && (
-                <div className="mt-4 space-y-2 border-t border-line pt-4">
-                  <CopyField label="Invitation link" value={u.invite!.link} />
-                  <GuardedButton allowed={manage} why={perm.why('manage')} onClick={resend}><Mail size={14} strokeWidth={1.5} aria-hidden /> Resend invitation</GuardedButton>
-                </div>
+          <SectionCard title="Active sessions">
+            {sessions.error ? <ErrorState message="Sessions could not be loaded." onRetry={sessions.reload} />
+              : !sessions.data ? <Skeleton className="h-16 w-full" />
+              : sessions.data.length === 0 ? <EmptyState icon={Smartphone} title="No active sessions" hint="They are signed out everywhere." />
+              : (
+                <ul className="divide-y divide-line">
+                  {sessions.data.map((s) => (
+                    <li key={s.id} className="py-2.5 first:pt-0 last:pb-0">
+                      <p className="truncate text-sm font-medium" title={s.device}>{s.device || 'Unknown device'}</p>
+                      <p className="text-xs text-muted">Signed in {formatDateTime(s.createdAt)} · last used <RelativeTime value={s.lastUsedAt} /> · idle limit {formatDateTime(s.idleExpiresAt)} · ends {formatDateTime(s.absoluteExpiresAt)}</p>
+                    </li>
+                  ))}
+                </ul>
               )}
-            </SectionCard>
-
-            <SectionCard title="Access">
-              <div className="flex flex-col items-stretch gap-2">
-                {u.status === 'active' || u.status === 'invited' ? (
-                  <GuardedButton allowed={manage && !isSelf} why={selfWhy ?? perm.why('manage')} onClick={() => setConfirm('suspend')}><Ban size={14} strokeWidth={1.5} aria-hidden /> Suspend</GuardedButton>
-                ) : (
-                  <GuardedButton allowed={manage} why={perm.why('manage')} className="btn-primary" onClick={() => setConfirm('reactivate')}><Play size={14} strokeWidth={1.5} aria-hidden /> Reactivate</GuardedButton>
-                )}
-                <GuardedButton allowed={manage} why={perm.why('manage')} onClick={() => setChangingPassword(true)}><KeyRound size={14} strokeWidth={1.5} aria-hidden /> Change password</GuardedButton>
-                <GuardedButton allowed={manage} why={perm.why('manage')} onClick={() => setConfirm('reset')}><KeyRound size={14} strokeWidth={1.5} aria-hidden /> Reset access</GuardedButton>
-                {u.status !== 'deactivated' && (
-                  <GuardedButton allowed={manage && !isSelf} why={selfWhy ?? perm.why('manage')} className="btn-danger" onClick={() => setConfirm('deactivate')}><UserX size={14} strokeWidth={1.5} aria-hidden /> Deactivate</GuardedButton>
-                )}
-              </div>
-            </SectionCard>
-          </div>
+          </SectionCard>
         </div>
-      )}
 
-      {u && editing && <EditAssignments key={u.id} initial={u.assignments} name={u.name} onClose={() => setEditing(false)} onSave={async (a) => {
-        try { await updateAssignments(u.id, a); toast.success(`Roles updated for ${u.name}.`); setEditing(false); reload() } catch (e) { toast.error(messageOf(e)) }
-      }} />}
+        <div className="space-y-4">
+          <SectionCard title="Account">
+            <DescriptionList cols={1} items={[
+              { label: 'Status', value: <StaffStatusBadge status={p.status} /> },
+              { label: 'Two-step sign-in', value: p.twoStepEnabled ? <Badge tone="success"><ShieldCheck size={12} aria-hidden /> On</Badge> : <Badge><ShieldOff size={12} aria-hidden /> Off</Badge> },
+              { label: 'Phone', value: p.phone ?? 'Not set' },
+              { label: 'Last sign-in', value: p.lastLoginAt ? <RelativeTime value={p.lastLoginAt} /> : 'Never signed in' },
+              { label: 'Created', value: formatDateTime(p.createdAt) },
+              { label: 'Active sessions', value: String(p.activeSessions) },
+              ...(p.mustChangePassword ? [{ label: 'Password', value: <Badge tone="warning">Must be changed at next sign-in</Badge> }] : []),
+              ...(locked ? [{ label: 'Locked until', value: <Badge tone="warning">{formatDateTime(locked)}</Badge> }] : []),
+              ...(p.status === 'DISABLED' ? [{ label: 'Disabled', value: <span>{p.disabledAt ? formatDateTime(p.disabledAt) : ''}{p.disabledReason ? ` · “${p.disabledReason}”` : ''}</span> }] : []),
+            ]} />
+          </SectionCard>
 
-      {u && editingExp && <EditExpertise key={u.id} initial={u.expertise} name={u.name} onClose={() => setEditingExp(false)} onSave={async (t) => {
-        try { await updateExpertise(u.id, t); toast.success(`Expertise updated for ${u.name}.`); setEditingExp(false); reload() } catch (e) { toast.error(messageOf(e)) }
-      }} />}
+          <SectionCard title="Actions">
+            <div className="flex flex-col items-stretch gap-2">
+              <GuardedButton allowed={manage} why={why()} onClick={() => setDialog({ kind: 'edit' })}><Pencil size={14} strokeWidth={1.5} aria-hidden /> Edit name and phone</GuardedButton>
+              {p.status === 'INVITED' && <GuardedButton allowed={manage} why={why()} onClick={() => setDialog({ kind: 'resend' })}><Mail size={14} strokeWidth={1.5} aria-hidden /> Resend invitation</GuardedButton>}
+              <GuardedButton allowed={manage && !(isSelf && p.isSuperAdmin)} why={why(isSelf ? selfWhy : undefined)} onClick={() => setDialog({ kind: 'superAdmin' })}>
+                <ShieldCheck size={14} strokeWidth={1.5} aria-hidden /> {p.isSuperAdmin ? 'Remove Super Admin' : 'Make Super Admin'}
+              </GuardedButton>
+              <GuardedButton allowed={manage && p.status === 'ACTIVE' && !isSelf} why={why(isSelf ? selfWhy : p.status !== 'ACTIVE' ? 'Only an active person can be sent a password reset.' : undefined)} onClick={() => setDialog({ kind: 'forceReset' })}>
+                <KeyRound size={14} strokeWidth={1.5} aria-hidden /> Force password reset
+              </GuardedButton>
+              <GuardedButton allowed={manage && p.twoStepEnabled} why={why(!p.twoStepEnabled ? 'Two-step sign-in is not on for this person.' : undefined)} onClick={() => setDialog({ kind: 'mfaReset' })}>
+                <ShieldOff size={14} strokeWidth={1.5} aria-hidden /> Reset two-step sign-in
+              </GuardedButton>
+              <GuardedButton allowed={manage} why={why()} onClick={() => setDialog({ kind: 'revokeSessions' })}><LogOut size={14} strokeWidth={1.5} aria-hidden /> Sign out all devices</GuardedButton>
+              {p.status === 'DISABLED' ? (
+                <GuardedButton allowed={manage} why={why()} className="btn-primary" onClick={() => setDialog({ kind: 'enable' })}><Play size={14} strokeWidth={1.5} aria-hidden /> Enable account</GuardedButton>
+              ) : (
+                <GuardedButton allowed={manage && !isSelf} why={why(isSelf ? selfWhy : undefined)} className="btn-danger" onClick={() => setDialog({ kind: 'disable' })}><Ban size={14} strokeWidth={1.5} aria-hidden /> Disable account</GuardedButton>
+              )}
+            </div>
+          </SectionCard>
+        </div>
+      </div>
 
-      <ConfirmDialog open={confirm === 'suspend'} onClose={() => setConfirm(null)} onConfirm={() => runStatus('suspend')} title={`Suspend ${u?.name}?`} confirmLabel="Suspend" danger
-        consequences={['Block sign-in immediately and end any open session.', 'Keep their roles, so reactivating restores the same access.', 'Leave papers and reviews assigned to them in place — reassign them if needed.', 'Be recorded in the audit log.']} />
-      <ConfirmDialog open={confirm === 'reactivate'} onClose={() => setConfirm(null)} onConfirm={() => runStatus('reactivate')} title={`Reactivate ${u?.name}?`} confirmLabel="Reactivate"
-        consequences={['Allow sign-in again with their previous roles.', 'Be recorded in the audit log.']} />
-      <ConfirmDialog open={confirm === 'deactivate'} onClose={() => setConfirm(null)} onConfirm={() => runStatus('deactivate')} title={`Deactivate ${u?.name}?`} confirmLabel="Deactivate" danger
-        consequences={['Permanently remove sign-in access (a Super Admin can reactivate later).', 'Keep their name on past decisions, reviews and audit entries.', 'Stop new work being assigned to them.', 'Be recorded in the audit log.']} />
-      <ConfirmDialog open={confirm === 'reset'} onClose={() => setConfirm(null)} onConfirm={runReset} title={`Reset access for ${u?.name}?`} confirmLabel="Reset access"
-        consequences={['Sign them out of every device.', 'Turn off their current two-step sign-in; they re-enrol on next sign-in.', 'Email a new set-password link.', 'Be recorded in the audit log.']} />
+      <EditStaffDialog person={p} open={dialog?.kind === 'edit'} onClose={close} onSaved={() => { toast.success('Details saved.'); reloadAll() }} onReload={reloadAll} />
+      <GrantRoleDialog person={p} open={dialog?.kind === 'grant'} onClose={close}
+        onGrant={({ journalCode, role, reason }: { journalCode: string; role: GrantableRole; reason: string }) => act(() => grantRole(p.id, { journalCode, role, reason }), `${roleLabel(role)} granted in ${journalCode}.`, true)} />
 
-      <ChangePasswordDialog user={changingPassword ? (u ?? null) : null} onClose={() => setChangingPassword(false)} onDone={reload} />
+      <ReasonDialog open={dialog?.kind === 'revoke'} onClose={close} danger confirmLabel="Revoke role" {...reasonProps}
+        title={dialog?.kind === 'revoke' ? `Revoke ${dialog.role} in ${dialog.journalCode}?` : 'Revoke role'}
+        consequences={['They lose what this role allows in that journal. Other roles are unchanged.', 'Their open sessions pick up the change on the next request.']}
+        onSubmit={(reason) => dialog?.kind === 'revoke' ? act(() => revokeRole(p.id, dialog.grantId, reason), 'Role revoked.', true) : undefined} />
 
-      <Dialog open={!!link} onClose={() => setLink(null)} title={link?.title ?? ''} footer={<button className="btn-primary" onClick={() => setLink(null)}>Done</button>}>
-        <p className="mb-3 text-sm text-muted">{link?.text}</p>
-        {link && <CopyField label="Link" value={link.url} />}
-      </Dialog>
+      <ReasonDialog open={dialog?.kind === 'superAdmin'} onClose={close} danger={p.isSuperAdmin} {...reasonProps}
+        title={p.isSuperAdmin ? `Remove Super Admin from ${p.fullName}?` : `Make ${p.fullName} a Super Admin?`}
+        confirmLabel={p.isSuperAdmin ? 'Remove Super Admin' : 'Make Super Admin'}
+        consequences={p.isSuperAdmin
+          ? ['They lose access to staff management and every Super Admin module.', 'At least one active Super Admin must remain.']
+          : ['They get access to every journal, to staff management and to the audit log.', 'Two-step sign-in becomes mandatory for them when the server requires it.']}
+        onSubmit={(reason) => act(() => setSuperAdmin(p.id, !p.isSuperAdmin, reason), p.isSuperAdmin ? 'Super Admin removed.' : 'Super Admin granted.', true)} />
+
+      <ReasonDialog open={dialog?.kind === 'disable'} onClose={close} danger confirmLabel="Disable account" {...reasonProps} title={`Disable ${p.fullName}?`}
+        consequences={['Block sign-in immediately and end all their sessions.', 'Keep their roles and history; enabling the account restores the same access.', 'Be recorded in the audit log. Nothing is deleted.']}
+        onSubmit={(reason) => act(() => disableStaff(p.id, reason), `${p.fullName} is disabled and signed out.`)} />
+
+      <ReasonDialog open={dialog?.kind === 'enable'} onClose={close} confirmLabel="Enable account" {...reasonProps} title={`Enable ${p.fullName}?`}
+        consequences={['Allow sign-in again with their previous roles (they stay invited if they never accepted).']}
+        onSubmit={(reason) => act(() => enableStaff(p.id, reason), `${p.fullName} can sign in again.`)} />
+
+      <ReasonDialog open={dialog?.kind === 'revokeSessions'} onClose={close} danger confirmLabel="Sign out all devices" {...reasonProps} title={`Sign ${p.fullName} out everywhere?`}
+        consequences={['End every session of this person on every device.', 'Their password and roles are unchanged; they can sign in again.']}
+        onSubmit={(reason) => act(async () => { const r = await revokeStaffSessions(p.id, reason); toast.info(`${r.revokedSessions} session${r.revokedSessions === 1 ? '' : 's'} ended.`) }, 'Sessions ended.')} />
+
+      <ReasonDialog open={dialog?.kind === 'forceReset'} onClose={close} danger confirmLabel="Force password reset" {...reasonProps} title={`Force a password reset for ${p.fullName}?`}
+        consequences={['Their current password stops working and all sessions end.', `A reset link is emailed to ${p.email}.`]}
+        onSubmit={(reason) => act(() => forcePasswordReset(p.id, reason), 'Reset link emailed.')} />
+
+      <ReasonDialog open={dialog?.kind === 'mfaReset'} onClose={close} danger confirmLabel="Reset two-step sign-in" {...reasonProps} title={`Reset two-step sign-in for ${p.fullName}?`}
+        consequences={['Remove their authenticator and recovery codes, and end all their sessions.', 'They sign in with their password; a Super Admin must set two-step up again at that sign-in.']}
+        onSubmit={(reason) => act(() => resetStaffMfa(p.id, reason), 'Two-step sign-in reset.')} />
+
+      <ConfirmDialog open={dialog?.kind === 'resend'} onClose={close} title={`Resend the invitation to ${p.email}?`} confirmLabel="Resend invitation"
+        consequences={['Email a new set-password link.', 'The previous link stops working.']}
+        onConfirm={() => fire(() => resendInvite(p.id), 'A new invitation was emailed.')} />
     </>
-  )
-}
-
-function EditAssignments({ initial, name, onClose, onSave }: { initial: Assignments; name: string; onClose: () => void; onSave: (a: Assignments) => Promise<void> }) {
-  const [value, setValue] = useState<Assignments>(initial)
-  const [saving, setSaving] = useState(false)
-  const changed = JSON.stringify(Object.entries(value).sort()) !== JSON.stringify(Object.entries(initial).sort())
-  return (
-    <Dialog open onClose={onClose} title={`Edit roles — ${name}`} description="One role per journal. Changes apply the next time they load a page." width={760}
-      footer={<>
-        <button className="btn-secondary" onClick={onClose}>Cancel</button>
-        <button className="btn-primary" disabled={!changed || saving} onClick={async () => { setSaving(true); await onSave(value); setSaving(false) }}>{saving ? 'Saving…' : 'Save roles'}</button>
-      </>}>
-      <RoleMatrix value={value} onChange={setValue} />
-      <p className="mt-2 text-xs text-muted">Choose “No access” to remove someone from a journal. At least one journal must remain; the last Super Admin cannot be demoted.</p>
-    </Dialog>
-  )
-}
-
-function EditExpertise({ initial, name, onClose, onSave }: { initial: string[]; name: string; onClose: () => void; onSave: (t: string[]) => Promise<void> }) {
-  const [value, setValue] = useState<string[]>(initial)
-  const [saving, setSaving] = useState(false)
-  const changed = JSON.stringify([...value].sort()) !== JSON.stringify([...initial].sort())
-  return (
-    <Dialog open onClose={onClose} title={`Expertise areas — ${name}`} description="Choose the subjects this person can review."
-      footer={<>
-        <button className="btn-secondary" onClick={onClose}>Cancel</button>
-        <button className="btn-primary" disabled={!changed || saving} onClick={async () => { setSaving(true); await onSave(value); setSaving(false) }}>{saving ? 'Saving…' : 'Save expertise'}</button>
-      </>}>
-      <ExpertisePicker value={value} onChange={setValue} />
-    </Dialog>
   )
 }

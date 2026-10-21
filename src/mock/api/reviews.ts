@@ -292,7 +292,7 @@ export function externalCandidates(paperId: string): ExternalCandidate[] {
   const { users, papers } = useDataStore.getState()
   const subjects = paperSubjects(p)
   return users
-    .filter((u) => u.status === 'active' && u.assignments[p.journal] === 'panel_member')
+    .filter((u) => u.status === 'ACTIVE' && u.assignments[p.journal] === 'REVIEW_PANEL_MEMBER')
     .map((user) => {
       const m = matchScore(subjects, EXPERTISE[user.id])
       const workload = papers.filter((x) => reviewerOf(x) === user.id && x.status === 'under_review').length
@@ -318,7 +318,7 @@ export async function assignExternalReviewer(args: { paperId: string; reviewerId
   await delay(null)
   const p = rawPaper(args.paperId)
   const member = findUser(args.reviewerId)
-  if (!member || member.assignments[p.journal] !== 'panel_member' || member.status !== 'active') throw new ApiError('Choose an active Review Panel Member of this journal.', 'invalid')
+  if (!member || member.assignments[p.journal] !== 'REVIEW_PANEL_MEMBER' || member.status !== 'ACTIVE') throw new ApiError('Choose an active Review Panel Member of this journal.', 'invalid')
   if (!['submitted', 'screening', 'under_review', 'decision_pending'].includes(p.status)) throw new ApiError('This paper is no longer in review.', 'invalid')
   const due = new Date(args.due)
   if (Number.isNaN(due.getTime()) || due.getTime() < new Date(new Date().toDateString()).getTime()) throw new ApiError('Choose a due date that is today or later.', 'invalid')

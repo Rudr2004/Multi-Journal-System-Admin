@@ -54,13 +54,13 @@ export async function createReviewPanelAccount(id: string): Promise<{ user: Staf
   const existing = users.find((u) => u.email.toLowerCase() === s.email.toLowerCase())
   if (existing) throw new ApiError(`An account for ${s.email} already exists (${existing.name}). Add the role from Users & roles instead.`, 'duplicate')
   const user: StaffUser = {
-    id: newId('u'), name: s.name, email: s.email, title: 'Review Panel Member', status: 'invited', twoStep: false,
-    assignments: { [s.journal]: 'panel_member' },
+    id: newId('u'), name: s.name, email: s.email, title: 'Review Panel Member', status: 'INVITED', twoStep: false,
+    assignments: { [s.journal]: 'REVIEW_PANEL_MEMBER' },
   }
   patch({ users: [...users, user] })
   const inviteLink = `${window.location.origin}/set-password?invite=${btoa(user.id).replace(/=+$/, '')}`
   setOutcome(id, { kind: 'account', label: `Review Panel Member account created for ${s.journal} (invited)`, ref: user.id, link: inviteLink })
-  recordAudit({ journal: s.journal, action: 'Created Review Panel Member account from reviewer application', target: `${s.name} <${s.email}>`, newValue: 'panel_member (invited)' })
+  recordAudit({ journal: s.journal, action: 'Created Review Panel Member account from reviewer application', target: `${s.name} <${s.email}>`, newValue: 'REVIEW_PANEL_MEMBER (invited)' })
   return { user, inviteLink }
 }
 

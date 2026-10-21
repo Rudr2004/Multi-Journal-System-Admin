@@ -7,7 +7,7 @@ import {
 } from 'lucide-react'
 import type { Role } from '@/shared/types'
 import type { Area } from '@/permissions/matrix'
-import { levelFor } from '@/permissions/matrix'
+import { levelForRoles } from '@/permissions/matrix'
 import type { FlagBadge } from '@/permissions/flags'
 
 export interface NavItem {
@@ -89,18 +89,18 @@ const group = (label: string, ...items: NavItem[]): NavGroup => ({ label, items 
 
 /** The client's sidebar for each role, in the client's order. Nothing outside this list appears in a role's menu. */
 export const ROLE_MENUS: Record<Role, NavGroup[]> = {
-  super_admin: [
+  SUPER_ADMIN: [
     group('', M.dashboard, M.users, M.issues, M.conferencesAdmin, M.announcements, M.boardAdmin, M.metrics, M.awardsAdmin, M.pages, M.notifications, M.referrals, M.newsletter),
     group('Settings', M.journalSettings, M.payments, M.commLog, M.forms, M.analytics, M.audit),
   ],
-  editor: [
+  EDITOR: [
     group('', M.dashboard, M.manuscripts, M.backdated, M.conferencesEditor, M.postCorrectionsManagement, M.scholar, M.awards),
     group('Website', M.announcements, M.boardEditor, M.pages, M.blog, M.forms),
   ],
-  associate_editor: [group('', M.dashboard, M.assigned, M.backdated, M.conferencesEditor, M.postCorrections)],
-  reviewer: [group('', M.dashboard, M.reviewSubmissions, M.reviewAssignmentsReviewer, M.blog)],
-  panel_member: [group('', M.dashboard, M.reviewAssignmentsPanel)],
-  support: [group('', M.dashboard, M.inbox, M.tickets, M.postCorrections)],
+  ASSOCIATE_EDITOR: [group('', M.dashboard, M.assigned, M.backdated, M.conferencesEditor, M.postCorrections)],
+  REVIEWER: [group('', M.dashboard, M.reviewSubmissions, M.reviewAssignmentsReviewer, M.blog)],
+  REVIEW_PANEL_MEMBER: [group('', M.dashboard, M.reviewAssignmentsPanel)],
+  SUPPORT_EXECUTIVE: [group('', M.dashboard, M.inbox, M.tickets, M.postCorrections)],
 }
 
 /* ---------- Section tab bars (secondary navigation inside a module) ---------- */
@@ -113,10 +113,10 @@ export interface Section {
 }
 
 export const SECTIONS: Section[] = [
-  { id: 'manuscripts-editor', label: 'Manuscript Submissions', roles: ['editor'], tabs: [{ ...M.manuscripts, label: 'Manuscripts' }, TABS.reviewMgmt, TABS.verify, TABS.finalApproval] },
-  { id: 'finance-admin', label: 'Payments & Invoices', roles: ['super_admin'], tabs: [{ ...M.payments, label: 'Payments' }, TABS.invoices] },
-  { id: 'publishing-admin', label: 'Journal & Issue Management', roles: ['super_admin'], tabs: [{ ...M.issues, label: 'Volumes & issues' }, TABS.doi, TABS.certificates] },
-  { id: 'notifications-admin', label: 'Notification Management', roles: ['super_admin'], tabs: [{ ...M.notifications, label: 'Notification Management' }, TABS.dispatch] },
+  { id: 'manuscripts-editor', label: 'Manuscript Submissions', roles: ['EDITOR'], tabs: [{ ...M.manuscripts, label: 'Manuscripts' }, TABS.reviewMgmt, TABS.verify, TABS.finalApproval] },
+  { id: 'finance-admin', label: 'Payments & Invoices', roles: ['SUPER_ADMIN'], tabs: [{ ...M.payments, label: 'Payments' }, TABS.invoices] },
+  { id: 'publishing-admin', label: 'Journal & Issue Management', roles: ['SUPER_ADMIN'], tabs: [{ ...M.issues, label: 'Volumes & issues' }, TABS.doi, TABS.certificates] },
+  { id: 'notifications-admin', label: 'Notification Management', roles: ['SUPER_ADMIN'], tabs: [{ ...M.notifications, label: 'Notification Management' }, TABS.dispatch] },
 ]
 
 /** Every routed module (menu items and tab-only screens), de-duplicated by path. */
@@ -130,26 +130,37 @@ export const ALL_NAV_ITEMS: NavItem[] = (() => {
   return [...seen.values()]
 })()
 
-/** Menu groups for a role, with anything the permission matrix blocks removed (safety net). */
-export function menuFor(role: Role | undefined): NavGroup[] {
-  if (!role) return []
-  return ROLE_MENUS[role]
-    .map((g) => ({ ...g, items: g.items.filter((n) => levelFor(role, n.area) !== 'none') }))
-    .filter((g) => g.items.length)
+/**
+ * Menu groups for the roles a person holds in the selected journal, with anything the permission matrix blocks removed
+ * (safety net). Roles are merged: groups with the same label are combined and a module appears once.
+ */
+export function menuFor(roles: readonly Role[]): NavGroup[] {
+  const merged: NavGroup[] = []
+  const seen = new Set<string>()
+  for (const role of roles) {
+    for (const g of ROLE_MENUS[role]) {
+      const items = g.items.filter((n) => levelForRoles(roles, n.area) !== 'none' && !seen.has(n.path))
+      items.forEach((n) => seen.add(n.path))
+      if (!items.length) continue
+      const existing = merged.find((m) => m.label === g.label)
+      if (existing) existing.items.push(...items)
+      else merged.push({ ...g, items })
+    }
+  }
+  return merged
 }
 
-export function sectionFor(role: Role | undefined, pathname: string): Section | undefined {
-  if (!role) return undefined
-  return SECTIONS.find((s) => s.roles.includes(role) && s.tabs.some((t) => t.path === pathname && levelFor(role, t.area) !== 'none'))
+export function sectionFor(roles: readonly Role[], pathname: string): Section | undefined {
+  return SECTIONS.find((s) => s.roles.some((r) => roles.includes(r)) && s.tabs.some((t) => t.path === pathname && levelForRoles(roles, t.area) !== 'none'))
 }
 
-/** Which menu entry (and group) a URL belongs to for this role — used for titles and breadcrumbs. */
-export function resolveNav(role: Role | undefined, pathname: string): { group?: NavGroup; item?: NavItem; exact?: boolean } {
-  const groups = menuFor(role)
+/** Which menu entry (and group) a URL belongs to for these roles — used for titles and breadcrumbs. */
+export function resolveNav(roles: readonly Role[], pathname: string): { group?: NavGroup; item?: NavItem; exact?: boolean } {
+  const groups = menuFor(roles)
   const flat = groups.flatMap((g) => g.items.map((item) => ({ g, item })))
   const exact = flat.find((x) => x.item.path === pathname)
   if (exact) return { group: exact.g, item: exact.item, exact: true }
-  const sec = role && SECTIONS.find((s) => s.roles.includes(role) && s.tabs.some((t) => pathname === t.path || (t.path !== '/' && pathname.startsWith(t.path + '/'))))
+  const sec = SECTIONS.find((s) => s.roles.some((r) => roles.includes(r)) && s.tabs.some((t) => pathname === t.path || (t.path !== '/' && pathname.startsWith(t.path + '/'))))
   if (sec) {
     const primary = flat.find((x) => sec.tabs.some((t) => t.path === x.item.path))
     if (primary) return { group: primary.g, item: primary.item, exact: false }

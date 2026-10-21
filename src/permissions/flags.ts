@@ -49,4 +49,4 @@ export const FLAG_META: Record<keyof FeatureFlags, { label: string; description:
 }
 
 /** Roles that only exist when a flag is on. */
-export const ROLE_FLAG: Partial<Record<Role, keyof FeatureFlags>> = { panel_member: 'reviewPanel' }
+export const ROLE_FLAG: Partial<Record<Role, keyof FeatureFlags>> = { REVIEW_PANEL_MEMBER: 'reviewPanel' }

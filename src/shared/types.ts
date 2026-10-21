@@ -9,9 +9,9 @@ export interface Journal {
   issn: string
 }
 
-export type Role = 'super_admin' | 'editor' | 'associate_editor' | 'reviewer' | 'panel_member' | 'support'
+export type Role = 'SUPER_ADMIN' | 'EDITOR' | 'ASSOCIATE_EDITOR' | 'REVIEWER' | 'REVIEW_PANEL_MEMBER' | 'SUPPORT_EXECUTIVE'
 
-export type UserStatus = 'active' | 'invited' | 'suspended' | 'deactivated'
+export type UserStatus = 'INVITED' | 'ACTIVE' | 'DISABLED'
 
 export interface StaffUser {
   id: string

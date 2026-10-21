@@ -5,7 +5,8 @@ import { toast } from '@/components/Toasts'
 import { Link, useNavigate } from 'react-router-dom'
 import { useDataStore, useSession } from '@/mock/store'
 import { nextDispatch } from '@/mock/data/papers'
-import { useCurrentUser, usePermission, useRole } from '@/permissions/hooks'
+import { signOut } from '@/lib/api/session'
+import { useCurrentUser, usePermission, useRole, useRoles } from '@/permissions/hooks'
 import { ROLE_META } from '@/permissions/roles'
 import { formatDate, formatRelative, formatTime } from '@/shared/formatters'
 import { Tooltip } from '@/components/Tooltip'
@@ -88,10 +89,9 @@ function HelpMenu() {
 
 function UserMenu() {
   const user = useCurrentUser()
-  const role = useRole()
+  const roles = useRoles()
   const density = useSession((s) => s.density)
   const setDensity = useSession((s) => s.setDensity)
-  const setUser = useSession((s) => s.setUser)
   const navigate = useNavigate()
   if (!user) return null
   return (
@@ -102,7 +102,7 @@ function UserMenu() {
           <UserAvatar name={user.name} photo={user.photo} size={32} />
           <span className="hidden whitespace-nowrap text-left leading-tight xl:block">
             <span className="block text-sm font-medium">{user.name}</span>
-            <span className="block text-xs text-muted">{role ? ROLE_META[role].label : 'No role'}</span>
+            <span className="block text-xs text-muted">{roles.length ? roles.map((r) => ROLE_META[r].label).join(', ') : 'No role'}</span>
           </span>
         </button>
       )}
@@ -113,7 +113,7 @@ function UserMenu() {
             <p className="text-sm font-semibold">{user.name}</p>
             <p className="text-xs text-muted">{user.email}</p>
             <Link to="/profile" onClick={close} className="mt-2 inline-block text-sm font-medium text-accent hover:underline">My profile &amp; password</Link>
-            <p className="mt-1.5 text-xs text-muted">Role in this journal: <span className="font-medium text-ink">{role ? ROLE_META[role].label : '—'}</span></p>
+            <p className="mt-1.5 text-xs text-muted">Role in this journal: <span className="font-medium text-ink">{roles.length ? roles.map((r) => ROLE_META[r].label).join(', ') : '—'}</span></p>
           </div>
           <div className="border-b border-line px-4 py-3">
             <p className="label">Display density</p>
@@ -127,7 +127,7 @@ function UserMenu() {
             </div>
           </div>
           <div className="p-1.5">
-            <button className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-sm hover:bg-subtle" onClick={() => { close(); setUser(null, 'ALL'); navigate('/login') }}>
+            <button className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-sm hover:bg-subtle" onClick={() => { close(); void signOut().then(() => navigate('/login')) }}>
               <LogOut size={16} strokeWidth={1.5} aria-hidden /> Sign out
             </button>
           </div>
@@ -152,7 +152,7 @@ export function Topbar() {
       </button>
       <button aria-label="Search" className="btn-ghost h-9 w-9 px-0 sm:hidden" onClick={() => setPalette(true)}><Search size={18} strokeWidth={1.5} /></button>
       <div className="ml-auto flex items-center gap-1">
-        {(role === 'reviewer' || role === 'panel_member') && (
+        {(role === 'REVIEWER' || role === 'REVIEW_PANEL_MEMBER') && (
           <span className="mr-1 inline-flex shrink-0 items-center gap-1.5 rounded-full border border-green-300 bg-green-50 px-2.5 py-1 text-xs font-semibold text-green-800" title="Authors and reviewers stay anonymous to each other throughout peer review.">
             <ShieldCheck size={14} aria-hidden /><span className="whitespace-nowrap"><span className="hidden md:inline">Double Blind Peer Review (Anonymous)</span><span className="md:hidden">Double blind</span></span>
           </span>

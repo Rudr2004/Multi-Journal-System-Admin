@@ -24,11 +24,11 @@ export function DashboardPage() {
   return (
     <>
       <PageHeader title="Dashboard" description={`${greeting()}, ${first}. Here is ${where} as ${role ? ROLE_META[role].label : 'a user'}.`} />
-      {role === 'super_admin' && <AdminDashboard />}
-      {role === 'editor' && <EditorDashboard />}
-      {role === 'associate_editor' && <AssociateDashboard />}
-      {(role === 'reviewer' || role === 'panel_member') && <ReviewerDashboard />}
-      {role === 'support' && <SupportDashboard />}
+      {role === 'SUPER_ADMIN' && <AdminDashboard />}
+      {role === 'EDITOR' && <EditorDashboard />}
+      {role === 'ASSOCIATE_EDITOR' && <AssociateDashboard />}
+      {(role === 'REVIEWER' || role === 'REVIEW_PANEL_MEMBER') && <ReviewerDashboard />}
+      {role === 'SUPPORT_EXECUTIVE' && <SupportDashboard />}
     </>
   )
 }

@@ -180,11 +180,6 @@ export function buildJournalSettings(): Record<JournalCode, JournalSettings> {
 /* Seeded user activity + audit history                                 */
 /* ------------------------------------------------------------------ */
 
-/** Hours since each seed user was last active. */
-export const SEED_LAST_ACTIVE_HOURS: Record<string, number> = {
-  'u-super': 0.3, 'u-editor': 2.5, 'u-ae': 5, 'u-multi': 27, 'u-reviewer': 52, 'u-panel': 200, 'u-support': 1.2,
-}
-
 export interface AuditCategoryDef { id: string; label: string }
 export const AUDIT_CATEGORIES: AuditCategoryDef[] = [
   { id: 'decision', label: 'Editorial decisions' },

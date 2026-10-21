@@ -19,7 +19,7 @@ const overdue = (iso?: string) => !!iso && differenceInCalendarDays(parseISO(iso
 /** Reviewer (reviews, completed reports, blog drafts) and Review Panel Member (assigned reviews only). */
 export function ReviewerDashboard() {
   const role = useRole()
-  const panel = role === 'panel_member'
+  const panel = role === 'REVIEW_PANEL_MEMBER'
   const user = useCurrentUser()!
   const scope = useSession((s) => s.journal)
   const journals = useJournals()

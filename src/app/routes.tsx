@@ -1,11 +1,13 @@
-import { useEffect } from 'react'
 import { Navigate, Outlet, createBrowserRouter, useLocation } from 'react-router-dom'
 import { AppLayout } from '@/layout/AppLayout'
 import { ALL_NAV_ITEMS } from '@/navigation/nav'
 import { RouteGuard } from '@/permissions/RouteGuard'
-import { useCurrentUser } from '@/permissions/hooks'
 import { DashboardPage } from '@/pages/dashboard/DashboardPage'
-import { ForgotPasswordPage, LoginPage, SetPasswordPage, VerifyPage } from '@/pages/auth/AuthPages'
+import { SessionLoading } from '@/pages/auth/AuthShell'
+import { LoginPage } from '@/pages/auth/LoginPage'
+import { MfaSetupPage } from '@/pages/auth/MfaSetupPage'
+import { AccountDisabledPage, ForcedChangePasswordPage, ForgotPasswordPage, SetPasswordPage } from '@/pages/auth/PasswordPages'
+import { VerifyPage } from '@/pages/auth/VerifyPage'
 import { editorialPages } from '@/pages/editorial/routes'
 import { productionPages } from '@/pages/production/routes'
 import { publishingPages } from '@/pages/publishing/routes'
@@ -19,7 +21,6 @@ import { useSession } from '@/mock/store'
 import { ComingSoon } from './ComingSoon'
 import { NotFoundPage } from './ErrorPages'
 import type { PageDef } from './pageDef'
-import { PrototypeControls } from '@/layout/PrototypeControls'
 import { ToastViewport } from '@/components/Toasts'
 import { useDensityEffect } from './useDensityEffect'
 
@@ -30,15 +31,14 @@ const REGISTERED: PageDef[] = [
   ...communicationPages, ...websitePages, ...insightsPages, ...adminPages,
 ]
 
+/** Signed-in area: waits for the session to be restored, sends everyone else to sign in, and holds back a forced password change. */
 function AuthGuard() {
-  const user = useCurrentUser()
-  const setUser = useSession((s) => s.setUser)
+  const authStatus = useSession((s) => s.authStatus)
+  const me = useSession((s) => s.me)
   const loc = useLocation()
-  // Account status is validated on every render of the protected area, not only at sign-in.
-  const blocked = !!user && (user.status === 'suspended' || user.status === 'deactivated')
-  useEffect(() => { if (blocked) setUser(null, 'ALL') }, [blocked, setUser])
-  if (blocked) return <Navigate to="/login" state={{ suspended: user!.status === 'suspended', deactivated: user!.status === 'deactivated' }} replace />
-  if (!user) return <Navigate to="/login" state={{ from: loc.pathname }} replace />
+  if (authStatus === 'loading') return <SessionLoading />
+  if (authStatus === 'anonymous' || !me) return <Navigate to="/login" state={{ from: loc.pathname + loc.search }} replace />
+  if (me.mustChangePassword && loc.pathname !== '/change-password') return <Navigate to="/change-password" replace />
   return <Outlet />
 }
 
@@ -47,7 +47,6 @@ function Root() {
   return (
     <>
       <Outlet />
-      <PrototypeControls />
       <ToastViewport />
     </>
   )
@@ -70,9 +69,12 @@ export const router = createBrowserRouter(
         { path: '/forgot-password', element: <ForgotPasswordPage /> },
         { path: '/set-password', element: <SetPasswordPage /> },
         { path: '/verify', element: <VerifyPage /> },
+        { path: '/mfa-setup', element: <MfaSetupPage /> },
+        { path: '/account-disabled', element: <AccountDisabledPage /> },
         {
           element: <AuthGuard />,
           children: [
+            { path: '/change-password', element: <ForcedChangePasswordPage /> },
             {
               element: <AppLayout />,
               children: [

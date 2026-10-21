@@ -39,8 +39,8 @@ const find = (id: string) => {
 /** Users who could take the production work for this journal: the journal's Associate Editor first, then anyone holding that role anywhere. */
 export function eligibleAssociateEditors(journal: JournalCode): StaffUser[] {
   const { users } = useDataStore.getState()
-  const active = users.filter((u) => u.status === 'active' && Object.values(u.assignments).includes('associate_editor'))
-  return [...active.filter((u) => u.assignments[journal] === 'associate_editor'), ...active.filter((u) => u.assignments[journal] !== 'associate_editor')]
+  const active = users.filter((u) => u.status === 'ACTIVE' && Object.values(u.assignments).includes('ASSOCIATE_EDITOR'))
+  return [...active.filter((u) => u.assignments[journal] === 'ASSOCIATE_EDITOR'), ...active.filter((u) => u.assignments[journal] !== 'ASSOCIATE_EDITOR')]
 }
 
 export interface VerifyResult {

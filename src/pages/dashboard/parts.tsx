@@ -15,9 +15,9 @@ export const LINK = 'text-sm font-medium text-accent hover:underline'
 /** Where a paper opens for each role (Associate Editor works it in production, reviewers in My reviews). */
 export function paperPath(role: Role | undefined, id: string): string {
   switch (role) {
-    case 'associate_editor': return `/production/${id}`
-    case 'reviewer':
-    case 'panel_member': return `/my-reviews/${id}`
+    case 'ASSOCIATE_EDITOR': return `/production/${id}`
+    case 'REVIEWER':
+    case 'REVIEW_PANEL_MEMBER': return `/my-reviews/${id}`
     default: return `/submissions/${id}`
   }
 }

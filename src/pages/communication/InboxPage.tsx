@@ -90,7 +90,7 @@ export function InboxPage() {
   const windowOpen = windowMs > 0
   const waTemplates = templates.filter((t) => t.channel === 'whatsapp')
   const tpl = waTemplates.find((t) => t.id === tplId)
-  const staff = users.filter((u) => u.status === 'active' && active && ['super_admin', 'editor', 'associate_editor', 'support'].includes(u.assignments[active.journal] ?? ''))
+  const staff = users.filter((u) => u.status === 'ACTIVE' && active && ['SUPER_ADMIN', 'EDITOR', 'ASSOCIATE_EDITOR', 'SUPPORT_EXECUTIVE'].includes(u.assignments[active.journal] ?? ''))
   const vars = active?.paper ? paperVars(active.paper) : sampleVars()
   const tplText = tpl ? renderText(tpl.body, vars) : ''
   const channelPaused = !!active && (active.channel === 'whatsapp' ? paused.whatsapp : active.channel === 'email' ? paused.email : false)

@@ -6,10 +6,10 @@ import type { PaperStatus, Role } from '@/shared/types'
  */
 export function paperStagePath(role: Role | undefined, p: { id: string; status: PaperStatus }): string {
   const id = encodeURIComponent(p.id)
-  if (role === 'associate_editor') return `/production/${id}`
-  if (role === 'reviewer' || role === 'panel_member') return `/my-reviews/${id}`
+  if (role === 'ASSOCIATE_EDITOR') return `/production/${id}`
+  if (role === 'REVIEWER' || role === 'REVIEW_PANEL_MEMBER') return `/my-reviews/${id}`
   const tab = (t: string) => `/submissions/${id}?tab=${t}`
-  if (role === 'support') return `/submissions/${id}`
+  if (role === 'SUPPORT_EXECUTIVE') return `/submissions/${id}`
   switch (p.status) {
     case 'under_review':
       return tab('review')

@@ -63,7 +63,7 @@ function Workspace({ initial, paperId }: { initial: ProductionRecord; paperId: s
   const events = useDataStore((s) => s.events)
   const perm = usePermission('production')
   const canApprove = useCan('finalApproval', 'approve')
-  const assigneeId = paper?.assigneeId ?? users.find((u) => u.status === 'active' && u.assignments[paper?.journal ?? 'IJMAT'] === 'associate_editor')?.id
+  const assigneeId = paper?.assigneeId ?? users.find((u) => u.status === 'ACTIVE' && u.assignments[paper?.journal ?? 'IJMAT'] === 'ASSOCIATE_EDITOR')?.id
   const canAct = useCanAct('production', 'work', assigneeId)
 
   const [record, setRecord] = useState(initial)

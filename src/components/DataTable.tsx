@@ -53,6 +53,11 @@ export interface DataTableProps<T> {
   rowClassName?: (row: T) => string | undefined
   /** Toolbar actions on the right (export, create…). */
   toolbarRight?: ReactNode
+  /**
+   * Server-side paging and search: `data` is the current page only. The table then neither slices, sorts nor filters rows
+   * itself; it reports page, page size and the search text and shows `total` as the result count. Debounce `onQueryChange` in the caller.
+   */
+  remote?: { page: number; limit: number; total: number; onPageChange: (page: number) => void; onLimitChange: (limit: number) => void; onQueryChange: (q: string) => void }
 }
 
 const load = <V,>(key: string, fallback: V): V => {
@@ -72,7 +77,7 @@ const save = (key: string, v: unknown) => {
 }
 
 export function DataTable<T>(p: DataTableProps<T>) {
-  const { id, data, columns, rowKey, search, selectable } = p
+  const { id, data, columns, rowKey, search, selectable, remote } = p
   const [query, setQuery] = useState('')
   const [sort, setSort] = useState<{ id: string; dir: 'asc' | 'desc' } | null>(null)
   const [hidden, setHidden] = useState<string[]>(() => load(`dt:${id}:hidden`, columns.filter((c) => c.defaultHidden).map((c) => c.id)))
@@ -101,6 +106,7 @@ export function DataTable<T>(p: DataTableProps<T>) {
   const visibleCols = columns.filter((c) => !hidden.includes(c.id))
 
   const rows = useMemo(() => {
+    if (remote) return data
     let r = data
     const q = query.trim().toLowerCase()
     if (q && search) r = r.filter((x) => search.text(x).toLowerCase().includes(q))
@@ -118,11 +124,14 @@ export function DataTable<T>(p: DataTableProps<T>) {
       }
     }
     return r
-  }, [data, query, sort, columns, search])
+  }, [data, query, sort, columns, search, remote])
 
-  const pages = Math.max(1, Math.ceil(rows.length / size))
-  const cur = Math.min(page, pages - 1)
-  const pageRows = rows.slice(cur * size, cur * size + size)
+  const total = remote ? remote.total : rows.length
+  const pageSize = remote ? remote.limit : size
+  const pages = Math.max(1, Math.ceil(total / pageSize))
+  const cur = remote ? Math.min(remote.page - 1, pages - 1) : Math.min(page, pages - 1)
+  const pageRows = remote ? rows : rows.slice(cur * size, cur * size + size)
+  const goTo = (n: number) => (remote ? remote.onPageChange(n + 1) : setPage(n))
   const selectedRows = data.filter((r) => selected.has(rowKey(r)))
   const allOnPage = pageRows.length > 0 && pageRows.every((r) => selected.has(rowKey(r)))
 
@@ -165,12 +174,12 @@ export function DataTable<T>(p: DataTableProps<T>) {
               ref={searchRef}
               aria-label={search.placeholder}
               value={query}
-              onChange={(e) => { setQuery(e.target.value); setPage(0) }}
+              onChange={(e) => { setQuery(e.target.value); setPage(0); remote?.onQueryChange(e.target.value) }}
               placeholder={search.placeholder}
               className="input pl-8 pr-8"
             />
             {query ? (
-              <button aria-label="Clear search" className="absolute right-2 top-1/2 -translate-y-1/2 text-faint hover:text-ink" onClick={() => setQuery('')}><X size={14} /></button>
+              <button aria-label="Clear search" className="absolute right-2 top-1/2 -translate-y-1/2 text-faint hover:text-ink" onClick={() => { setQuery(''); remote?.onQueryChange('') }}><X size={14} /></button>
             ) : (
               <span className="kbd absolute right-2 top-1/2 -translate-y-1/2">/</span>
             )}
@@ -306,18 +315,18 @@ export function DataTable<T>(p: DataTableProps<T>) {
       {/* pagination */}
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line px-4 py-2.5 text-sm text-muted">
         <span aria-live="polite">
-          {rows.length === 0 ? '0 results' : `${cur * size + 1}–${Math.min(rows.length, cur * size + size)} of ${rows.length}`}
+          {total === 0 ? '0 results' : `${cur * pageSize + 1}–${Math.min(total, cur * pageSize + pageSize)} of ${total}`}
         </span>
         <div className="flex items-center gap-3">
           <label className="flex items-center gap-2">Rows
-            <select className="input !h-8 !w-auto py-0" value={size} onChange={(e) => { setSize(Number(e.target.value)); setPage(0) }}>
+            <select className="input !h-8 !w-auto py-0" value={pageSize} onChange={(e) => { const n = Number(e.target.value); if (remote) remote.onLimitChange(n); else { setSize(n); setPage(0) } }}>
               {[10, 25, 50].map((n) => <option key={n}>{n}</option>)}
             </select>
           </label>
           <div className="flex items-center gap-1">
-            <button className="btn-secondary !h-8 !px-2" aria-label="Previous page" disabled={cur === 0} onClick={() => setPage(cur - 1)}><ChevronLeft size={16} /></button>
+            <button className="btn-secondary !h-8 !px-2" aria-label="Previous page" disabled={cur === 0} onClick={() => goTo(cur - 1)}><ChevronLeft size={16} /></button>
             <span className="px-1 text-ink">{cur + 1} / {pages}</span>
-            <button className="btn-secondary !h-8 !px-2" aria-label="Next page" disabled={cur >= pages - 1} onClick={() => setPage(cur + 1)}><ChevronRight size={16} /></button>
+            <button className="btn-secondary !h-8 !px-2" aria-label="Next page" disabled={cur >= pages - 1} onClick={() => goTo(cur + 1)}><ChevronRight size={16} /></button>
           </div>
         </div>
       </div>

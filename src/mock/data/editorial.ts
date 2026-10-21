@@ -348,23 +348,23 @@ export interface ReviewerCandidate {
 }
 
 export const reviewerKindOf = (user: StaffUser | undefined, journal: JournalCode): ReviewerKind =>
-  user?.assignments[journal] === 'panel_member' ? 'panel' : 'in_house'
+  user?.assignments[journal] === 'REVIEW_PANEL_MEMBER' ? 'panel' : 'in_house'
 
 /** All active reviewers / panel members for a journal, with subject-match scores for the paper. */
 export function candidatesFor(paper: Paper, users: StaffUser[], reviewPanelOn: boolean) {
   const subjects = paperSubjects(paper)
-  const build = (role: 'reviewer' | 'panel_member'): ReviewerCandidate[] =>
+  const build = (role: 'REVIEWER' | 'REVIEW_PANEL_MEMBER'): ReviewerCandidate[] =>
     users
-      .filter((u) => u.status === 'active' && u.assignments[paper.journal] === role)
+      .filter((u) => u.status === 'ACTIVE' && u.assignments[paper.journal] === role)
       .map((user) => {
         const m = matchScore(subjects, EXPERTISE[user.id])
-        return { user, kind: role === 'reviewer' ? ('in_house' as const) : ('panel' as const), score: m.score, matched: m.matched, expertise: EXPERTISE[user.id] ?? [] }
+        return { user, kind: role === 'REVIEWER' ? ('in_house' as const) : ('panel' as const), score: m.score, matched: m.matched, expertise: EXPERTISE[user.id] ?? [] }
       })
       .sort((a, b) => b.score - a.score)
-  const inHouse = build('reviewer')
+  const inHouse = build('REVIEWER')
   const best = inHouse[0]?.score ?? 0
   const outside = best < IN_HOUSE_MATCH_THRESHOLD
-  const panel = reviewPanelOn && outside ? build('panel_member') : []
+  const panel = reviewPanelOn && outside ? build('REVIEW_PANEL_MEMBER') : []
   return { inHouse, panel, outside, subjects, best }
 }
 
@@ -455,7 +455,7 @@ export function messageContentFor(template: string, paper: Paper) {
 /* ------------------------------------------------------------------ */
 const PAST_REVIEW: PaperStatus[] = ['decision_pending', 'changes_requested', 'accepted', 'payment_pending', 'paid', 'in_production', 'returned_to_production', 'ready_for_approval', 'published', 'indexed', 'retracted', 'corrected']
 
-const editorOf = (j: JournalCode) => SEED_USERS.find((u) => u.assignments[j] === 'editor')?.name ?? 'Priya Menon'
+const editorOf = (j: JournalCode) => SEED_USERS.find((u) => u.assignments[j] === 'EDITOR')?.name ?? 'Priya Menon'
 
 function reviewerFor(p: Paper): StaffUser | undefined {
   if (p.reviewerId) return SEED_USERS.find((u) => u.id === p.reviewerId)
@@ -555,7 +555,7 @@ export function buildEditorialSeed(papers: Paper[]): EditorialSeed {
     if (order >= 3 || (p.status === 'rejected' && lastReview.length)) {
       if (p.status !== 'screening') push(editor, 'completed screening — scope and formatting checks passed', 0.2)
     }
-    if (reviewer && (order >= 3 || p.status === 'rejected')) push(editor, `assigned ${reviewer.name} as reviewer`, 0.3, reviewer.assignments[p.journal] === 'panel_member' ? 'Outside in-house expertise — Review Panel Member selected.' : 'Subject match with in-house expertise.')
+    if (reviewer && (order >= 3 || p.status === 'rejected')) push(editor, `assigned ${reviewer.name} as reviewer`, 0.3, reviewer.assignments[p.journal] === 'REVIEW_PANEL_MEMBER' ? 'Outside in-house expertise — Review Panel Member selected.' : 'Subject match with in-house expertise.')
     for (const r of lastReview) push(r.reviewerName, `submitted a review report — ${recommendationMeta(r.recommendation).label}`, 0.5)
     const d = decisions.find((x) => x.paperId === p.id)
     if (d) push(d.by, `recorded decision: ${DECISION_META[d.kind].label.toLowerCase()}`, 0.7, d.reason)

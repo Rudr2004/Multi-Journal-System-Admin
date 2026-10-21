@@ -1,7 +1,7 @@
 import { NavLink } from 'react-router-dom'
 import { PanelLeftClose, PanelLeftOpen, X } from 'lucide-react'
 import { menuFor } from '@/navigation/nav'
-import { useCurrentUser, useRole } from '@/permissions/hooks'
+import { useCurrentUser, useRole, useRoles } from '@/permissions/hooks'
 import { ROLE_META } from '@/permissions/roles'
 import { useSession } from '@/mock/store'
 import { cn } from '@/lib/utils'
@@ -25,8 +25,7 @@ export function Logo({ compact, dark }: { compact?: boolean; dark?: boolean }) {
 }
 
 function Nav({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?: () => void }) {
-  const role = useRole()
-  const groups = menuFor(role)
+  const groups = menuFor(useRoles())
   return (
     <nav aria-label="Main" className="sidebar-scroll flex-1 overflow-y-auto px-3 pb-4">
       {groups.map((g) => (

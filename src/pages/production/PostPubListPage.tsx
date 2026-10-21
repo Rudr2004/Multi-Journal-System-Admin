@@ -25,8 +25,8 @@ export function PostPubListPage() {
   const user = useCurrentUser()
   const raise = useCanRaise()
   const feeOn = useSession((s) => s.flags.correctionFee)
-  const isSupport = perm.role === 'support'
-  const isAe = perm.role === 'associate_editor'
+  const isSupport = perm.role === 'SUPPORT_EXECUTIVE'
+  const isAe = perm.role === 'ASSOCIATE_EDITOR'
   const rev = useProductionStore((s) => s.changeRequests)
   const users = useDataStore((s) => s.users)
   const papers = useDataStore((s) => s.papers)

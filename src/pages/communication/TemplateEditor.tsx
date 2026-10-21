@@ -103,7 +103,6 @@ export function TemplateEditor({ template, canEdit, why, onDirty, onSaved }: {
   const [format, setFormat] = useState<'text' | 'html'>(template.format ?? 'text')
   const [html, setHtml] = useState(template.html ?? '')
   const [device, setDevice] = useState<'desktop' | 'mobile'>('desktop')
-  const [htmlFocused, setHtmlFocused] = useState(false)
   const [layoutId, setLayoutId] = useState('')
   const layouts = useCommStore((st) => st.htmlLayouts)
   const htmlRef = useRef<HTMLTextAreaElement>(null)
@@ -133,7 +132,8 @@ export function TemplateEditor({ template, canEdit, why, onDirty, onSaved }: {
 
   const insert = (key: string) => {
     const inHtml = format === 'html' && lastField.current === 'html'
-    const token = inHtml ? `{${key}}` : `{{${key}}}`
+    // Email placeholders are written {author_name}; SMS and WhatsApp keep the {{double}} form their gateways expect.
+    const token = isEmail ? `{${key}}` : `{{${key}}}`
     const el = lastField.current === 'subject' ? subjectRef.current : inHtml ? htmlRef.current : bodyRef.current
     const cur = lastField.current === 'subject' ? subject : inHtml ? html : body
     const start = el?.selectionStart ?? cur.length
@@ -228,11 +228,11 @@ export function TemplateEditor({ template, canEdit, why, onDirty, onSaved }: {
           {isEmail ? (
             <>
               <FormField label="Subject" required error={touched ? errors.subject : undefined}>
-                {(p) => <input {...p} ref={subjectRef} className="input" value={subject} readOnly={!canEdit} onFocus={() => { lastField.current = 'subject'; setHtmlFocused(false) }} onChange={(e) => setSubject(e.target.value)} onBlur={() => setTouched(true)} />}
+                {(p) => <input {...p} ref={subjectRef} className="input" value={subject} readOnly={!canEdit} onFocus={() => { lastField.current = 'subject' }} onChange={(e) => setSubject(e.target.value)} onBlur={() => setTouched(true)} />}
               </FormField>
               <div role="radiogroup" aria-label="Email format" className="inline-flex rounded-lg bg-subtle p-0.5">
                 {([['text', 'Plain text', FileText], ['html', 'HTML code', Code2]] as const).map(([v, label, Icon]) => (
-                  <button key={v} type="button" role="radio" aria-checked={format === v} disabled={!canEdit} onClick={() => setFormat(v)}
+                  <button key={v} type="button" role="radio" aria-checked={format === v} disabled={!canEdit} onClick={() => { setFormat(v); if (v === 'html' && !html.trim()) setHtml(STARTER_HTML) }}
                     className={cn('inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium disabled:cursor-not-allowed', format === v ? 'bg-surface text-ink shadow-sm' : 'text-muted hover:text-ink')}>
                     <Icon size={14} strokeWidth={1.5} aria-hidden /> {label}
                   </button>
@@ -241,7 +241,7 @@ export function TemplateEditor({ template, canEdit, why, onDirty, onSaved }: {
 
               {format === 'text' ? (
                 <FormField label="Body" required error={touched ? errors.body : undefined} hint="Plain text. Placeholders are replaced with each paper’s data when the email is sent.">
-                  {(p) => <textarea {...p} ref={bodyRef} rows={14} className="input !h-auto py-2 font-mono text-[13px] leading-6" value={body} readOnly={!canEdit} onFocus={() => { lastField.current = 'body'; setHtmlFocused(false) }} onChange={(e) => setBody(e.target.value)} onBlur={() => setTouched(true)} />}
+                  {(p) => <textarea {...p} ref={bodyRef} rows={14} className="input !h-auto py-2 font-mono text-[13px] leading-6" value={body} readOnly={!canEdit} onFocus={() => { lastField.current = 'body' }} onChange={(e) => setBody(e.target.value)} onBlur={() => setTouched(true)} />}
                 </FormField>
               ) : (
                 <>
@@ -259,7 +259,7 @@ export function TemplateEditor({ template, canEdit, why, onDirty, onSaved }: {
                     {(p) => (
                       <textarea {...p} ref={htmlRef} rows={20} spellCheck={false} wrap="off" readOnly={!canEdit} value={html}
                         className="block w-full resize-y rounded-md border border-slate-700 bg-slate-950 p-3 font-mono text-[12.5px] leading-5 text-slate-100 outline-none focus:ring-2 focus:ring-accent"
-                        onFocus={() => { lastField.current = 'html'; setHtmlFocused(true) }} onChange={(e) => setHtml(e.target.value)} onBlur={() => setTouched(true)} />
+                        onFocus={() => { lastField.current = 'html' }} onChange={(e) => setHtml(e.target.value)} onBlur={() => setTouched(true)} />
                     )}
                   </FormField>
                   <p className="-mt-2 text-right text-xs tabular-nums text-muted">{html.split('\n').length} lines · {html.length.toLocaleString('en-IN')} characters</p>
@@ -278,13 +278,13 @@ export function TemplateEditor({ template, canEdit, why, onDirty, onSaved }: {
                     <summary className="cursor-pointer text-sm font-medium">Plain-text version <span className="font-normal text-muted">(shown by email clients that cannot display HTML)</span></summary>
                     <div className="mt-3">
                       <FormField label="Plain-text body" required error={touched ? errors.body : undefined}>
-                        {(p) => <textarea {...p} ref={bodyRef} rows={8} className="input !h-auto py-2 font-mono text-[13px] leading-6" value={body} readOnly={!canEdit} onFocus={() => { lastField.current = 'body'; setHtmlFocused(false) }} onChange={(e) => setBody(e.target.value)} onBlur={() => setTouched(true)} />}
+                        {(p) => <textarea {...p} ref={bodyRef} rows={8} className="input !h-auto py-2 font-mono text-[13px] leading-6" value={body} readOnly={!canEdit} onFocus={() => { lastField.current = 'body' }} onChange={(e) => setBody(e.target.value)} onBlur={() => setTouched(true)} />}
                       </FormField>
                     </div>
                   </details>
                 </>
               )}
-              <VariableChips onInsert={insert} disabled={!canEdit} single={format === 'html' && htmlFocused} />
+              <VariableChips onInsert={insert} disabled={!canEdit} single={isEmail} />
               {format === 'html' && <p className="-mt-2 text-xs text-muted">Both <span className="font-mono">{'{author_name}'}</span> and <span className="font-mono">{'{{author_name}}'}</span> work. Click inside the HTML box first to insert a placeholder there.</p>}
             </>
           ) : (

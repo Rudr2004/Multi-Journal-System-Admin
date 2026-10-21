@@ -53,7 +53,7 @@ export function TicketDetailPage() {
     )
   }
 
-  const assignable = users.filter((u) => u.status === 'active' && u.assignments[ticket.journal] && ['super_admin', 'editor', 'associate_editor', 'support'].includes(u.assignments[ticket.journal]!))
+  const assignable = users.filter((u) => u.status === 'ACTIVE' && u.assignments[ticket.journal] && ['SUPER_ADMIN', 'EDITOR', 'ASSOCIATE_EDITOR', 'SUPPORT_EXECUTIVE'].includes(u.assignments[ticket.journal]!))
   const assignee = users.find((u) => u.id === ticket.assigneeId)
   const resolved = ticket.status === 'resolved'
   const tooShort = text.trim().length < 3

@@ -41,10 +41,15 @@ export function ReviewAssignmentsPage() {
       { id: 'status', header: 'Status', sort: (r) => r.status, cell: (r) => <Badge tone={STATUS[r.status].tone}>{STATUS[r.status].label}</Badge> },
       { id: 'due', header: 'Due date', sort: (r) => r.due, cell: (r) => (r.status === 'submitted' ? <span className="text-faint">&mdash;</span> : <DueChip value={r.due} />) },
       {
-        id: 'reminders', header: 'Reminders', sort: (r) => r.reminders.count,
+        id: 'reminders', header: 'Reminders', className: 'min-w-[150px]', sort: (r) => r.reminders.count,
         cell: (r) => (r.reminders.count
-          ? <span className="inline-flex items-center gap-1 text-sm"><Bell size={13} aria-hidden /> {r.reminders.count} sent{r.reminders.lastAt && <span className="text-xs text-muted">&middot; <RelativeTime value={r.reminders.lastAt} /></span>}</span>
-          : <span className="text-faint">None sent</span>),
+          ? (
+            <div className="leading-tight">
+              <p className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800"><Bell size={12} aria-hidden /> {r.reminders.count} {r.reminders.count === 1 ? 'reminder' : 'reminders'} sent</p>
+              {r.reminders.lastAt && <p className="mt-1 whitespace-nowrap text-xs text-muted">Last sent <RelativeTime value={r.reminders.lastAt} /></p>}
+            </div>
+          )
+          : <span className="whitespace-nowrap text-sm text-faint">None sent</span>),
       },
       {
         id: 'reassign', header: '', locked: true, mobileHide: false,

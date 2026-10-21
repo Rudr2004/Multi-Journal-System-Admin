@@ -1,6 +1,8 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { ActivityEntry, Author, AuditEntry, DoiDeposit, Issue, JournalCode, JournalScope, MessageLogEntry, Paper, PaperEvent, Payment, StaffUser, Ticket, WhatsAppChat } from '@/shared/types'
+import type { Me } from '@/lib/api/types'
+import { staffUserFromMe } from '@/permissions/me'
 import { DEFAULT_FLAGS, type FeatureFlags } from '@/permissions/features'
 import { JOURNAL_CODES, SEED_USERS } from './data/core'
 import { buildIssues, buildPayments } from './data/finance'
@@ -69,24 +71,36 @@ function seed() {
 
 export const useDataStore = create<DataState>((set) => ({
   ...seed(),
-  reset: () => { clearPaperOverrides(); set(seed()) },
+  reset: () => {
+    clearPaperOverrides()
+    set(seed())
+    const { me } = useSession.getState()
+    if (me) applyMe(me) // the signed-in person is not part of the seed data
+  },
   patch: (p) => set(p),
 }))
 
 registerReset(() => useDataStore.getState().reset())
 
-/* ---------- Session + UI preferences (persisted per browser) ---------- */
+/* ---------- Session + UI preferences ---------- */
 export type Density = 'comfortable' | 'compact'
 
+/** Why a session ended without the person asking for it (shown once on the sign-in page). */
+export type SessionNotice = 'revoked' | 'expired' | 'unreachable'
+
+/** `loading`: restoring the session from the refresh cookie on page load. */
+export type AuthStatus = 'loading' | 'authenticated' | 'anonymous'
+
 interface SessionState {
+  authStatus: AuthStatus
+  /** The signed-in person as the platform API describes them. Never persisted: it is restored from the refresh cookie. */
+  me: Me | null
   userId: string | null
-  pending2faUserId: string | null
+  notice: SessionNotice | null
   journal: JournalScope
   density: Density
   sidebarCollapsed: boolean
   flags: FeatureFlags
-  setUser: (id: string | null, journal: JournalScope) => void
-  setPending2fa: (id: string | null) => void
   setJournal: (j: JournalScope) => void
   setDensity: (d: Density) => void
   toggleSidebar: () => void
@@ -96,14 +110,14 @@ interface SessionState {
 export const useSession = create<SessionState>()(
   persist(
     (set) => ({
+      authStatus: 'loading',
+      me: null,
       userId: null,
-      pending2faUserId: null,
+      notice: null,
       journal: 'ALL',
       density: 'comfortable',
       sidebarCollapsed: false,
       flags: DEFAULT_FLAGS,
-      setUser: (userId, journal) => set({ userId, journal, pending2faUserId: null }),
-      setPending2fa: (pending2faUserId) => set({ pending2faUserId }),
       setJournal: (journal) => set({ journal }),
       setDensity: (density) => set({ density }),
       toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
@@ -111,12 +125,25 @@ export const useSession = create<SessionState>()(
     }),
     {
       name: 'journal-admin-session',
-      version: 2,
-      migrate: (persisted) => ({ ...(persisted as object), flags: DEFAULT_FLAGS }),
-      merge: (persisted, current) => {
+      version: 3,
+      // Identity and permissions are never stored in the browser; only display preferences.
+      partialize: (s) => ({ journal: s.journal, density: s.density, sidebarCollapsed: s.sidebarCollapsed }),
+      migrate: (persisted) => {
         const p = (persisted ?? {}) as Partial<SessionState>
-        return { ...current, ...p, flags: { ...current.flags, ...(p.flags ?? {}) } }
+        return { journal: p.journal, density: p.density, sidebarCollapsed: p.sidebarCollapsed }
       },
     },
   ),
 )
+
+/** Makes `me` the current person: stored for access checks, and added to the mock user list the other screens read names from. */
+export function applyMe(me: Me) {
+  const user = staffUserFromMe(me)
+  const { users, patch } = useDataStore.getState()
+  patch({ users: users.some((u) => u.id === user.id) ? users.map((u) => (u.id === user.id ? { ...u, ...user } : u)) : [...users, user] })
+  useSession.setState((s) => ({ me, userId: me.id, authStatus: 'authenticated', flags: { ...s.flags, reviewPanel: me.flags.reviewPanel } }))
+}
+
+export function clearMe(notice: SessionNotice | null = null) {
+  useSession.setState({ me: null, userId: null, authStatus: 'anonymous', notice })
+}

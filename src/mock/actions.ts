@@ -55,7 +55,7 @@ const OPEN_PRODUCTION: PaperStatus[] = ['paid', 'in_production', 'returned_to_pr
 
 /** Active Associate Editors who hold that role in this journal. */
 export function journalAssociateEditors(journal: JournalCode) {
-  return useDataStore.getState().users.filter((u) => u.status === 'active' && u.assignments[journal] === 'associate_editor')
+  return useDataStore.getState().users.filter((u) => u.status === 'ACTIVE' && u.assignments[journal] === 'ASSOCIATE_EDITOR')
 }
 
 /** How many manuscripts an Associate Editor is working on right now. */

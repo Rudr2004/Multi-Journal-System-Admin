@@ -1,16 +1,16 @@
 import { NavLink, useLocation } from 'react-router-dom'
 import { sectionFor } from '@/navigation/nav'
-import { levelFor } from '@/permissions/matrix'
-import { useRole } from '@/permissions/hooks'
+import { levelForRoles } from '@/permissions/matrix'
+import { useRoles } from '@/permissions/hooks'
 import { cn } from '@/lib/utils'
 
 /** Secondary navigation inside a module (e.g. Manuscript Submissions → Review management → Final approval). */
 export function SectionTabs() {
   const { pathname } = useLocation()
-  const role = useRole()
-  const section = sectionFor(role, pathname)
+  const roles = useRoles()
+  const section = sectionFor(roles, pathname)
   if (!section) return null
-  const tabs = section.tabs.filter((t) => levelFor(role, t.area) !== 'none')
+  const tabs = section.tabs.filter((t) => levelForRoles(roles, t.area) !== 'none')
   if (tabs.length < 2) return null
   return (
     <nav aria-label={`${section.label} sections`} className="-mt-1 mb-5 flex gap-1 overflow-x-auto border-b border-line">

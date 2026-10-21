@@ -32,7 +32,6 @@ export const TEMPLATE_VARIABLES: TemplateVariable[] = [
   { key: 'support_email', label: 'Support email', sample: 'support@edtechpublishers.in' },
 ]
 export const VARIABLE_KEYS = new Set(TEMPLATE_VARIABLES.map((v) => v.key))
-const VAR_RE = /\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}/g
 
 export const sampleVars = (): Record<string, string> => Object.fromEntries(TEMPLATE_VARIABLES.map((v) => [v.key, v.sample]))
 
@@ -57,14 +56,10 @@ export function paperVars(p: Paper): Record<string, string> {
   }
 }
 
-export const renderText = (text: string, vars: Record<string, string>) =>
-  text.replace(VAR_RE, (m, k: string) => vars[k] ?? m)
+/** Placeholders can be written {author_name} or {{author_name}}: both work in every template. */
+export const renderText = (text: string, vars: Record<string, string>) => renderAny(text, vars)
 
-export const usedVariables = (text: string): string[] => {
-  const out: string[] = []
-  for (const m of text.matchAll(VAR_RE)) if (!out.includes(m[1])) out.push(m[1])
-  return out
-}
+export const usedVariables = (text: string): string[] => usedVariablesAny(text)
 export const unknownVariables = (text: string) => usedVariables(text).filter((k) => !VARIABLE_KEYS.has(k))
 
 /** HTML emails accept both {{paper_id}} and the shorter {paper_id}. */
@@ -176,7 +171,9 @@ export function buildTemplates(): MessageTemplate[] {
   TEMPLATE_EVENTS.forEach((e, i) => {
     if (e.channels.includes('email')) {
       const [subject, body] = EMAIL[e.key]
-      out.push({ id: `${e.key}:email`, event: e.key, channel: 'email', subject, body, updatedAt: ago(24 * (9 + i)), updatedBy: 'Priya Menon' })
+      // Email placeholders are shown as {author_name}; both {author_name} and {{author_name}} still work everywhere.
+      const single = (t: string) => t.replace(/\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}/g, '{$1}')
+      out.push({ id: `${e.key}:email`, event: e.key, channel: 'email', subject: single(subject), body: single(body), updatedAt: ago(24 * (9 + i)), updatedBy: 'Priya Menon' })
     }
     if (e.channels.includes('sms')) {
       out.push({ id: `${e.key}:sms`, event: e.key, channel: 'sms', body: SMS[e.key], dltId: `1107${(170012340000 + i * 3719).toString()}`, senderId: 'EDTPUB', approvedAt: ago(24 * 140), updatedAt: ago(24 * 140), updatedBy: 'DLT registry' })

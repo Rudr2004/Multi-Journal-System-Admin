@@ -17,7 +17,7 @@ export function AppLayout() {
       <div className="flex min-w-0 flex-1 flex-col">
         <Topbar />
         <main id="main" tabIndex={-1} className="relative flex-1 overflow-y-auto p-6 outline-none">
-          {(role === 'reviewer' || role === 'panel_member') && (
+          {(role === 'REVIEWER' || role === 'REVIEW_PANEL_MEMBER') && (
             <p role="note" className="mb-5 flex items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-900"><ShieldCheck size={16} className="shrink-0" aria-hidden /> Double Blind Peer Review (Anonymous)</p>
           )}
           <SectionTabs />

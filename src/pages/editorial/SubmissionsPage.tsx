@@ -91,7 +91,7 @@ export function SubmissionsPage() {
       { id: 'payment', header: 'Payment', sort: (r) => r.paymentStatus, cell: (r) => <PaymentStatusBadge status={r.paymentStatus} /> },
       { id: 'type', header: 'Type', sort: (r) => r.articleType, cell: (r) => <span className="whitespace-nowrap text-muted">{r.articleType}</span> },
       { id: 'report', header: 'Review Report', sort: (r) => Number(reviewed.has(r.id)), cell: (r) => reviewed.has(r.id) ? <Badge tone="success">Available</Badge> : <Badge tone="neutral">Not Available</Badge> },
-      { id: 'conference', header: 'Conference', defaultHidden: true, sort: (r) => r.conference, cell: (r) => <span className="whitespace-nowrap text-muted">{r.conference}</span> },
+      { id: 'conference', header: 'Conference', sort: (r) => r.conference, cell: (r) => <span className="whitespace-nowrap text-muted">{r.conference}</span> },
       { id: 'issue', header: 'Volume / Issue', defaultHidden: true, sort: (r) => issueLabel.get(r.backdatedIssueId ?? '') ?? '', cell: (r) => r.backdatedIssueId ? <span className="whitespace-nowrap">{issueLabel.get(r.backdatedIssueId) ?? r.backdatedIssueId}</span> : <span className="text-faint">—</span> },
       { id: 'updated', header: 'Last update', defaultHidden: true, sort: (r) => r.updatedAt, cell: (r) => <span className="whitespace-nowrap text-muted"><RelativeTime value={r.updatedAt} /></span> },
     )
@@ -212,7 +212,7 @@ function AssigneeBody({ papers, onClose, onDone }: { papers: Paper[]; onClose: (
         {(a) => (
           <select {...a} className="input" value={value} onChange={(e) => setValue(e.target.value)} disabled={q.loading}>
             <option value="">{q.loading ? 'Loading…' : 'Select an Associate Editor'}</option>
-            {(q.data ?? []).map((u) => <option key={u.id} value={u.id}>{u.name} · {journals.filter((j) => u.assignments[j] === 'associate_editor').join(', ') || 'other journals'}</option>)}
+            {(q.data ?? []).map((u) => <option key={u.id} value={u.id}>{u.name} · {journals.filter((j) => u.assignments[j] === 'ASSOCIATE_EDITOR').join(', ') || 'other journals'}</option>)}
           </select>
         )}
       </FormField>

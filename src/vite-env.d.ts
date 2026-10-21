@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 
 interface ImportMetaEnv {
-  readonly VITE_API_BASE_URL?: string
-  readonly VITE_PROTOTYPE?: string
+  /** Origin of the platform API, without the /api/v1 path. */
+  readonly VITE_PLATFORM_API_URL?: string
 }

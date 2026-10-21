@@ -170,7 +170,7 @@ export function ReviewTab({ paper }: { paper: Paper }) {
             <div className="min-w-0 flex-1">
               <DescriptionList cols={3} items={[
                 { label: 'Reviewer', value: <span className="font-medium">{reviewer.name}</span> },
-                { label: 'Type', value: <ReviewerTypeBadge kind={reviewer.assignments[paper.journal] === 'panel_member' ? 'panel' : 'in_house'} /> },
+                { label: 'Type', value: <ReviewerTypeBadge kind={reviewer.assignments[paper.journal] === 'REVIEW_PANEL_MEMBER' ? 'panel' : 'in_house'} /> },
                 { label: 'Contact', value: reviewer.phone ? <a href={`tel:${reviewer.phone.replace(/\s/g, '')}`} className="inline-flex items-center gap-1.5 hover:text-accent"><Phone size={13} aria-hidden className="text-faint" />{reviewer.phone}</a> : <a href={`mailto:${reviewer.email}`} className="text-accent hover:underline">{reviewer.email}</a> },
                 { label: 'Review due', value: <DueChip value={paper.reviewDue} /> },
                 { label: 'Reminders sent', value: reminders?.count ?? 0 },

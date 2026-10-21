@@ -3,8 +3,8 @@ import { Command } from 'cmdk'
 import { useNavigate } from 'react-router-dom'
 import { CornerDownLeft, FileText, LifeBuoy, Search } from 'lucide-react'
 import { SECTIONS, menuFor } from '@/navigation/nav'
-import { levelFor } from '@/permissions/matrix'
-import { useJournals, useRole } from '@/permissions/hooks'
+import { levelForRoles } from '@/permissions/matrix'
+import { useJournals, useRole, useRoles } from '@/permissions/hooks'
 import { useDataStore, useSession } from '@/mock/store'
 import { doiFor } from '@/shared/paperId'
 import { STATUS_META } from '@/shared/statuses'
@@ -20,6 +20,7 @@ export function CommandPalette() {
   const setOpen = useUi((s) => s.setPalette)
   const navigate = useNavigate()
   const role = useRole()
+  const roles = useRoles()
   const journals = useJournals()
   const scope = useSession((s) => s.journal)
   const papers = useDataStore((s) => s.papers)
@@ -35,13 +36,13 @@ export function CommandPalette() {
 
   const visible = (j: string) => (scope === 'ALL' ? journals.includes(j as never) : j === scope)
   const pages = useMemo(() => {
-    const main = menuFor(role).flatMap((g) => g.items.map((i) => ({ ...i, group: g.label || 'Main' })))
+    const main = menuFor(roles).flatMap((g) => g.items.map((i) => ({ ...i, group: g.label || 'Main' })))
     const seen = new Set(main.map((m) => m.path))
-    const extra = SECTIONS.filter((s) => role && s.roles.includes(role)).flatMap((s) => s.tabs.filter((t) => !seen.has(t.path) && levelFor(role, t.area) !== 'none' && seen.add(t.path)).map((t) => ({ ...t, group: s.label })))
+    const extra = SECTIONS.filter((s) => s.roles.some((r) => roles.includes(r))).flatMap((s) => s.tabs.filter((t) => !seen.has(t.path) && levelForRoles(roles, t.area) !== 'none' && seen.add(t.path)).map((t) => ({ ...t, group: s.label })))
     return [...main, ...extra]
-  }, [role])
-  const canSeePapers = levelFor(role, 'submissions') !== 'none'
-  const canSeeTickets = levelFor(role, 'helpdesk') !== 'none'
+  }, [roles])
+  const canSeePapers = levelForRoles(roles, 'submissions') !== 'none'
+  const canSeeTickets = levelForRoles(roles, 'helpdesk') !== 'none'
   const go = (to: string) => { setOpen(false); navigate(to) }
 
   return (

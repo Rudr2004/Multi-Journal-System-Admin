@@ -2,9 +2,11 @@ import { useEffect, useMemo, type ReactNode } from 'react'
 import { useDataStore, useSession } from '@/mock/store'
 import type { JournalCode, JournalScope, Role, StaffUser } from '@/shared/types'
 import { JOURNAL_CODES } from '@/mock/data/core'
+import type { Me } from '@/lib/api/types'
 import type { FeatureFlags } from './features'
 import { ROLE_FLAG } from './features'
-import { LEVEL_LABEL, LEVEL_RANK, levelFor, type Area, type Level } from './matrix'
+import { LEVEL_LABEL, LEVEL_RANK, levelForRoles, type Area, type Level } from './matrix'
+import { permissionsOf, rolesInJournal } from './me'
 import { ROLE_META } from './roles'
 
 function roleEnabled(role: Role | undefined, flags: FeatureFlags): Role | undefined {
@@ -14,18 +16,19 @@ function roleEnabled(role: Role | undefined, flags: FeatureFlags): Role | undefi
 }
 
 export function assignedJournals(user: StaffUser | undefined, flags: FeatureFlags): JournalCode[] {
-  if (!user || user.status !== 'active') return []
+  if (!user || user.status !== 'ACTIVE') return []
   return JOURNAL_CODES.filter((c) => roleEnabled(user.assignments[c], flags))
 }
 
 export function isSuperAdmin(user: StaffUser | undefined) {
-  return !!user && Object.values(user.assignments).includes('super_admin')
+  return !!user && Object.values(user.assignments).includes('SUPER_ADMIN')
 }
 
-export function roleFor(user: StaffUser | undefined, scope: JournalScope, flags: FeatureFlags): Role | undefined {
-  if (!user) return undefined
-  if (scope === 'ALL') return isSuperAdmin(user) ? 'super_admin' : undefined
-  return roleEnabled(user.assignments[scope], flags)
+/** Roles the person holds in the selected journal (several are possible), highest first. */
+export function rolesFor(me: Me | null, scope: JournalScope, flags: FeatureFlags): Role[] {
+  if (!me || me.status !== 'ACTIVE') return []
+  if (scope === 'ALL') return me.isSuperAdmin ? ['SUPER_ADMIN'] : []
+  return rolesInJournal(me, scope).filter((r) => roleEnabled(r, flags))
 }
 
 export function useCurrentUser(): StaffUser | undefined {
@@ -53,12 +56,23 @@ export function useEnsureValidJournal() {
   }, [user, journals, scope, setJournal])
 }
 
-/** The user's role in the currently selected journal. */
-export function useRole(): Role | undefined {
-  const user = useCurrentUser()
+/** Roles of the current user in the selected journal. */
+export function useRoles(): Role[] {
+  const me = useSession((s) => s.me)
   const scope = useSession((s) => s.journal)
   const flags = useSession((s) => s.flags)
-  return roleFor(user, scope, flags)
+  return useMemo(() => rolesFor(me, scope, flags), [me, scope, flags])
+}
+
+/** The highest-ranking role in the selected journal: drives the dashboard and labels. Access checks use `usePermission`. */
+export function useRole(): Role | undefined {
+  return useRoles()[0]
+}
+
+/** Does the person hold this permission string (for example `staff.manage`) in any journal? */
+export function useHasPermission(permission: string): boolean {
+  const me = useSession((s) => s.me)
+  return useMemo(() => permissionsOf(me).has(permission), [me, permission])
 }
 
 export interface Permission {
@@ -71,8 +85,11 @@ export interface Permission {
 }
 
 export function usePermission(area: Area): Permission {
-  const role = useRole()
-  const level = levelFor(role, area)
+  const roles = useRoles()
+  const canManageStaff = useHasPermission('staff.manage')
+  const role = roles[0]
+  // User management follows the server's permission string, not the role name.
+  const level: Level = area === 'users' ? (canManageStaff ? 'manage' : 'none') : levelForRoles(roles, area)
   return useMemo(() => {
     const can = (min: Level = 'view') => LEVEL_RANK[level] >= LEVEL_RANK[min]
     return {

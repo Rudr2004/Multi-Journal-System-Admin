@@ -95,7 +95,7 @@ export function MyReviewsPage() {
   const navigate = useNavigate()
   const ctx = useAccess('myReviews')
   const role = useRole()
-  const seesAll = role === 'reviewer'
+  const seesAll = role === 'REVIEWER'
   const allJournals = useIsAllJournals()
   const mine = useAsync(() => listMyReviews(ctx.userId, ctx.journals), [ctx])
   const hist = useAsync(() => listMyReviewHistory(ctx.userId, ctx.journals), [ctx])

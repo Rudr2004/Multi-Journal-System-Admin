@@ -1,7 +1,7 @@
 import { ChevronRight } from 'lucide-react'
 import { Link, useLocation } from 'react-router-dom'
 import { resolveNav } from '@/navigation/nav'
-import { useRole } from '@/permissions/hooks'
+import { useRoles } from '@/permissions/hooks'
 import { DraftLabel } from '@/components/States'
 import { Badge } from '@/components/Badges'
 
@@ -22,8 +22,8 @@ interface Props {
  */
 export function PageHeader({ title, description, actions, crumbs = [], draft, badges = [] }: Props) {
   const { pathname } = useLocation()
-  const role = useRole()
-  const { group, item, exact } = resolveNav(role, pathname)
+  const roles = useRoles()
+  const { group, item, exact } = resolveNav(roles, pathname)
   const shownTitle = exact && item ? item.label : title
   const trail = [
     ...(group?.label ? [{ label: group.label }] : []),

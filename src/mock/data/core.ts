@@ -11,31 +11,18 @@ export const JOURNALS: Journal[] = [
 export const JOURNAL_CODES = JOURNALS.map((j) => j.code)
 export const journalByCode = (c: JournalCode) => JOURNALS.find((j) => j.code === c)!
 
-export const DEMO_PASSWORD = 'demo'
-
-const ALL = Object.fromEntries(JOURNAL_CODES.map((c) => [c, 'super_admin'])) as StaffUser['assignments']
+const ALL = Object.fromEntries(JOURNAL_CODES.map((c) => [c, 'SUPER_ADMIN'])) as StaffUser['assignments']
 
 export const SEED_USERS: StaffUser[] = [
-  { id: 'u-super', name: 'Priya Menon', email: 'priya.menon@edtechpublishers.in', title: 'Publishing Director', status: 'active', twoStep: true, assignments: ALL },
-  { id: 'u-editor', name: 'Rohan Mehta', email: 'rohan.mehta@edtechpublishers.in', title: 'Senior Editor', status: 'active', twoStep: false, assignments: { IJMAT: 'editor', IJCSD: 'editor' } },
-  { id: 'u-ae', name: 'Neha Kapoor', email: 'neha.kapoor@edtechpublishers.in', title: 'Associate Editor', status: 'active', twoStep: false, assignments: { JIMRT: 'associate_editor' } },
-  { id: 'u-ae-2', name: 'Dr. Sameer Joshi', email: 'sameer.joshi@edtechpublishers.in', title: 'Associate Editor', phone: '+91 98240 33917', status: 'active', twoStep: false, assignments: { IJMAT: 'associate_editor', IJCSD: 'associate_editor' } },
-  { id: 'u-multi', name: 'Karan Shah', email: 'karan.shah@edtechpublishers.in', title: 'Editor & Associate Editor', status: 'active', twoStep: false, assignments: { IJMAT: 'editor', JIMRT: 'associate_editor' } },
-  { id: 'u-reviewer', phone: '+91 98200 11142', name: 'Dr. Ananya Iyer', email: 'ananya.iyer@edtechpublishers.in', title: 'In-house Reviewer', status: 'active', twoStep: false, assignments: { IJMAT: 'reviewer' } },
-  { id: 'u-panel', phone: '+34 612 345 678', name: 'Dr. Sofia Alvarez', email: 'sofia.alvarez@university.example', title: 'Review Panel Member', status: 'active', twoStep: false, assignments: { IJECM: 'panel_member', IJMAT: 'panel_member' } },
-  { id: 'u-rev-cs', phone: '+91 98765 20431', name: 'Dr. Vikrant Rao', email: 'vikrant.rao@edtechpublishers.in', title: 'In-house Reviewer', status: 'active', twoStep: false, assignments: { IJCSD: 'reviewer', IJECM: 'reviewer' } },
-  { id: 'u-rev-mgmt', phone: '+91 99870 55102', name: 'Prof. Meenal Joshi', email: 'meenal.joshi@edtechpublishers.in', title: 'In-house Reviewer', status: 'active', twoStep: false, assignments: { JIMRT: 'reviewer', IJFRD: 'reviewer' } },
-  { id: 'u-panel-2', phone: '+49 151 2345 6789', name: 'Dr. Hannah Weiss', email: 'hannah.weiss@university.example', title: 'Review Panel Member', status: 'active', twoStep: false, assignments: { IJMAT: 'panel_member', JIMRT: 'panel_member', IJCSD: 'panel_member', IJFRD: 'panel_member' } },
-  { id: 'u-support', phone: '+91 98250 77310', name: 'Isha Desai', email: 'isha.desai@edtechpublishers.in', title: 'Support Executive', status: 'active', twoStep: false, assignments: { IJMAT: 'support', JIMRT: 'support' } },
+  { id: 'u-super', name: 'Priya Menon', email: 'priya.menon@edtechpublishers.in', title: 'Publishing Director', status: 'ACTIVE', twoStep: true, assignments: ALL },
+  { id: 'u-editor', name: 'Rohan Mehta', email: 'rohan.mehta@edtechpublishers.in', title: 'Senior Editor', status: 'ACTIVE', twoStep: false, assignments: { IJMAT: 'EDITOR', IJCSD: 'EDITOR' } },
+  { id: 'u-ae', name: 'Neha Kapoor', email: 'neha.kapoor@edtechpublishers.in', title: 'Associate Editor', status: 'ACTIVE', twoStep: false, assignments: { JIMRT: 'ASSOCIATE_EDITOR' } },
+  { id: 'u-ae-2', name: 'Dr. Sameer Joshi', email: 'sameer.joshi@edtechpublishers.in', title: 'Associate Editor', phone: '+91 98240 33917', status: 'ACTIVE', twoStep: false, assignments: { IJMAT: 'ASSOCIATE_EDITOR', IJCSD: 'ASSOCIATE_EDITOR' } },
+  { id: 'u-multi', name: 'Karan Shah', email: 'karan.shah@edtechpublishers.in', title: 'Editor & Associate Editor', status: 'ACTIVE', twoStep: false, assignments: { IJMAT: 'EDITOR', JIMRT: 'ASSOCIATE_EDITOR' } },
+  { id: 'u-reviewer', phone: '+91 98200 11142', name: 'Dr. Ananya Iyer', email: 'ananya.iyer@edtechpublishers.in', title: 'In-house Reviewer', status: 'ACTIVE', twoStep: false, assignments: { IJMAT: 'REVIEWER' } },
+  { id: 'u-panel', phone: '+34 612 345 678', name: 'Dr. Sofia Alvarez', email: 'sofia.alvarez@university.example', title: 'Review Panel Member', status: 'ACTIVE', twoStep: false, assignments: { IJECM: 'REVIEW_PANEL_MEMBER', IJMAT: 'REVIEW_PANEL_MEMBER' } },
+  { id: 'u-rev-cs', phone: '+91 98765 20431', name: 'Dr. Vikrant Rao', email: 'vikrant.rao@edtechpublishers.in', title: 'In-house Reviewer', status: 'ACTIVE', twoStep: false, assignments: { IJCSD: 'REVIEWER', IJECM: 'REVIEWER' } },
+  { id: 'u-rev-mgmt', phone: '+91 99870 55102', name: 'Prof. Meenal Joshi', email: 'meenal.joshi@edtechpublishers.in', title: 'In-house Reviewer', status: 'ACTIVE', twoStep: false, assignments: { JIMRT: 'REVIEWER', IJFRD: 'REVIEWER' } },
+  { id: 'u-panel-2', phone: '+49 151 2345 6789', name: 'Dr. Hannah Weiss', email: 'hannah.weiss@university.example', title: 'Review Panel Member', status: 'ACTIVE', twoStep: false, assignments: { IJMAT: 'REVIEW_PANEL_MEMBER', JIMRT: 'REVIEW_PANEL_MEMBER', IJCSD: 'REVIEW_PANEL_MEMBER', IJFRD: 'REVIEW_PANEL_MEMBER' } },
+  { id: 'u-support', phone: '+91 98250 77310', name: 'Isha Desai', email: 'isha.desai@edtechpublishers.in', title: 'Support Executive', status: 'ACTIVE', twoStep: false, assignments: { IJMAT: 'SUPPORT_EXECUTIVE', JIMRT: 'SUPPORT_EXECUTIVE' } },
 ]
-
-/** Shown as quick-fill chips on the login screen (prototype only). */
-export const DEMO_USER_LABELS: Record<string, string> = {
-  'u-super': 'Super Admin — all journals',
-  'u-editor': 'Editor — IJMAT, IJCSD',
-  'u-ae': 'Associate Editor — JIMRT',
-  'u-multi': 'Multi-role — Editor IJMAT, Assoc. Editor JIMRT',
-  'u-reviewer': 'Reviewer — IJMAT',
-  'u-panel': 'Review Panel Member — IJECM',
-  'u-support': 'Support Executive — IJMAT, JIMRT',
-}

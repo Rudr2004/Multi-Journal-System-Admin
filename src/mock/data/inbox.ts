@@ -66,25 +66,25 @@ export function buildInboxConvos(papers: Paper[]): { convos: InboxConvo[]; meta:
 /* Staff alerts (in-app) by role                                        */
 /* ------------------------------------------------------------------ */
 
-export type AlertRole = 'super_admin' | 'editor' | 'associate_editor' | 'reviewer' | 'panel_member' | 'support'
+export type AlertRole = 'SUPER_ADMIN' | 'EDITOR' | 'ASSOCIATE_EDITOR' | 'REVIEWER' | 'REVIEW_PANEL_MEMBER' | 'SUPPORT_EXECUTIVE'
 export interface StaffAlertType { key: string; label: string; description: string; roles: AlertRole[] }
 
-export const ALERT_ROLES: AlertRole[] = ['super_admin', 'editor', 'associate_editor', 'reviewer', 'panel_member', 'support']
+export const ALERT_ROLES: AlertRole[] = ['SUPER_ADMIN', 'EDITOR', 'ASSOCIATE_EDITOR', 'REVIEWER', 'REVIEW_PANEL_MEMBER', 'SUPPORT_EXECUTIVE']
 
 export const STAFF_ALERT_TYPES: StaffAlertType[] = [
-  { key: 'new_submission', label: 'New submission', description: 'A manuscript arrives and is ready for screening.', roles: ['super_admin', 'editor'] },
-  { key: 'decision_due', label: 'Decision due', description: 'Reviews are complete and a decision is waiting.', roles: ['super_admin', 'editor'] },
-  { key: 'payment_verify', label: 'Payment to verify', description: 'An offline payment needs verification.', roles: ['super_admin', 'editor'] },
-  { key: 'offline_proof', label: 'Offline proof uploaded', description: 'An author uploaded a bank or UPI proof.', roles: ['super_admin', 'editor'] },
-  { key: 'production_returned', label: 'Production returned', description: 'A paper was returned to production.', roles: ['super_admin', 'editor', 'associate_editor'] },
-  { key: 'review_due', label: 'Review due', description: 'A review report is due soon or overdue.', roles: ['super_admin', 'editor', 'reviewer', 'panel_member'] },
-  { key: 'correction_request', label: 'Correction request', description: 'A post-publication correction was raised.', roles: ['super_admin', 'editor', 'associate_editor', 'support'] },
-  { key: 'ticket_assigned', label: 'Ticket assigned', description: 'A support ticket was assigned to the person.', roles: ['super_admin', 'support'] },
-  { key: 'whatsapp_message', label: 'WhatsApp message', description: 'A new inbound message in the Communication Inbox.', roles: ['super_admin', 'support'] },
-  { key: 'failed_message', label: 'Failed message', description: 'An email, SMS or WhatsApp message failed to deliver.', roles: ['super_admin', 'support'] },
+  { key: 'new_submission', label: 'New submission', description: 'A manuscript arrives and is ready for screening.', roles: ['SUPER_ADMIN', 'EDITOR'] },
+  { key: 'decision_due', label: 'Decision due', description: 'Reviews are complete and a decision is waiting.', roles: ['SUPER_ADMIN', 'EDITOR'] },
+  { key: 'payment_verify', label: 'Payment to verify', description: 'An offline payment needs verification.', roles: ['SUPER_ADMIN', 'EDITOR'] },
+  { key: 'offline_proof', label: 'Offline proof uploaded', description: 'An author uploaded a bank or UPI proof.', roles: ['SUPER_ADMIN', 'EDITOR'] },
+  { key: 'production_returned', label: 'Production returned', description: 'A paper was returned to production.', roles: ['SUPER_ADMIN', 'EDITOR', 'ASSOCIATE_EDITOR'] },
+  { key: 'review_due', label: 'Review due', description: 'A review report is due soon or overdue.', roles: ['SUPER_ADMIN', 'EDITOR', 'REVIEWER', 'REVIEW_PANEL_MEMBER'] },
+  { key: 'correction_request', label: 'Correction request', description: 'A post-publication correction was raised.', roles: ['SUPER_ADMIN', 'EDITOR', 'ASSOCIATE_EDITOR', 'SUPPORT_EXECUTIVE'] },
+  { key: 'ticket_assigned', label: 'Ticket assigned', description: 'A support ticket was assigned to the person.', roles: ['SUPER_ADMIN', 'SUPPORT_EXECUTIVE'] },
+  { key: 'whatsapp_message', label: 'WhatsApp message', description: 'A new inbound message in the Communication Inbox.', roles: ['SUPER_ADMIN', 'SUPPORT_EXECUTIVE'] },
+  { key: 'failed_message', label: 'Failed message', description: 'An email, SMS or WhatsApp message failed to deliver.', roles: ['SUPER_ADMIN', 'SUPPORT_EXECUTIVE'] },
 ]
 
 export type StaffAlertPrefs = Record<string, Partial<Record<AlertRole, boolean>>>
 const OFF_BY_DEFAULT = ['whatsapp_message', 'ticket_assigned', 'review_due']
 export const buildStaffAlerts = (): StaffAlertPrefs =>
-  Object.fromEntries(STAFF_ALERT_TYPES.map((a) => [a.key, Object.fromEntries(a.roles.map((r) => [r, !(r === 'super_admin' && OFF_BY_DEFAULT.includes(a.key))]))]))
+  Object.fromEntries(STAFF_ALERT_TYPES.map((a) => [a.key, Object.fromEntries(a.roles.map((r) => [r, !(r === 'SUPER_ADMIN' && OFF_BY_DEFAULT.includes(a.key))]))]))

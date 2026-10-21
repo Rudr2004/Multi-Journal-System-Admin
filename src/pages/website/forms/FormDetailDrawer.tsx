@@ -195,7 +195,7 @@ function Detail({ s, onChanged }: { s: FormSubmission; onChanged: () => void }) 
       <ReasonDialog open={!!reasonFor} onClose={() => setReasonFor(null)} danger={reasonFor === 'rejected'} confirmLabel={reasonFor === 'rejected' ? 'Reject' : 'Put on hold'}
         title={reasonFor === 'rejected' ? `Reject ${s.name}'s submission` : `Put ${s.name}'s submission on hold`}
         description="The reason is saved with the submission and in the audit log."
-        onSubmit={(r) => reasonFor && change(reasonFor, r)} />
+        onSubmit={(r) => { if (reasonFor) void change(reasonFor, r) }} />
     </div>
   )
 }

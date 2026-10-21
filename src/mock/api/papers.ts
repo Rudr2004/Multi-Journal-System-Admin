@@ -75,7 +75,7 @@ export async function getPaperDetail(paperId: string, ctx: AccessCtx): Promise<P
 /** Staff who can be made responsible for a paper (production assignee). */
 export const listAssignees = (journals: JournalCode[]) =>
   delay(
-    useDataStore.getState().users.filter((u) => u.status === 'active' && journals.some((j) => u.assignments[j] === 'associate_editor')),
+    useDataStore.getState().users.filter((u) => u.status === 'ACTIVE' && journals.some((j) => u.assignments[j] === 'ASSOCIATE_EDITOR')),
     120, 260,
   )
 
@@ -83,7 +83,7 @@ export async function assignAssignee(paperIds: string[], assigneeId: string): Pr
   await delay(null)
   const user = useDataStore.getState().users.find((u) => u.id === assigneeId)
   if (!user) throw new ApiError('Assignee not found.', 'not_found')
-  const eligible = paperIds.map(rawPaper).filter((p) => user.assignments[p.journal] === 'associate_editor')
+  const eligible = paperIds.map(rawPaper).filter((p) => user.assignments[p.journal] === 'ASSOCIATE_EDITOR')
   if (eligible.length === 0) throw new ApiError(`${user.name} is not an Associate Editor for the selected papers’ journals.`, 'invalid')
   for (const p of eligible) {
     updatePaper(p.id, { assigneeId }, { event: `assigned ${user.name} as responsible Associate Editor` })

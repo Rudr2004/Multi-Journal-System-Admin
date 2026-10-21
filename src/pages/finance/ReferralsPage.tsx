@@ -63,7 +63,7 @@ export function ReferralsPage() {
     auditFlagChange('referralSystem', next)
     toast.success(next ? 'Referral system resumed. The referral code field and referral details are shown on the website again.' : 'Referral system paused. The referral code field and referral details are hidden on the website. Existing records are kept.')
   }
-  const [f, setF] = useState({ status: '', referrer: '' })
+  const [f, setF] = useState({ status: 'eligible', referrer: '' }) // opens on the credits that are ready to pay out; choose All to see every credit
   const [paying, setPaying] = useState<ReferralRow[] | null>(null)
   const [cancelling, setCancelling] = useState<ReferralRow | null>(null)
   const [editing, setEditing] = useState<ReferralRow | null>(null)
