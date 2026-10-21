@@ -9,6 +9,8 @@ import { errorMessage, isApiError } from '@/lib/api/errors'
 import { applyServerFieldErrors } from '@/lib/api/forms'
 import { startSession } from '@/lib/api/session'
 import { useSession, type SessionNotice } from '@/mock/store'
+import { MOCK_DATA } from '@/mock/mode'
+import { DEMO_PASSWORD, demoUsers, startDemoSession } from '@/mock/demoLogin'
 import { AuthShell, Notice, SessionLoading } from './AuthShell'
 import { CaptchaField } from './CaptchaField'
 import { useLoginFlow } from './loginFlow'
@@ -104,6 +106,22 @@ export function LoginPage() {
           {isSubmitting ? 'Signing in…' : locked ? `Locked · ${formatCountdown(lock.remaining)}` : 'Sign in'}
         </button>
       </form>
+      {MOCK_DATA && (
+        <div className="mt-5 border-t border-line pt-4">
+          <p className="text-xs font-semibold uppercase tracking-wider text-faint">Demo accounts</p>
+          <p className="text-xs text-muted">Local mode only: no backend needed. Password: <span className="kbd">{DEMO_PASSWORD}</span></p>
+          <ul className="mt-2 space-y-1.5">
+            {demoUsers().slice(0, 9).map((u) => (
+              <li key={u.id}>
+                <button type="button" onClick={() => { if (startDemoSession(u.id)) navigate(from, { replace: true }) }} className="flex w-full items-center justify-between gap-3 rounded-md border border-line px-3 py-2 text-left text-sm hover:bg-subtle">
+                  <span className="min-w-0"><span className="block truncate font-medium">{u.name}</span><span className="block truncate text-xs text-muted">{u.title}</span></span>
+                  <span className="shrink-0 text-xs text-muted">{Object.keys(u.assignments).join(', ')}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </AuthShell>
   )
 }

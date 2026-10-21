@@ -18,18 +18,30 @@ import { insightsPages } from '@/pages/insights/routes'
 import { adminPages } from '@/pages/admin/routes'
 import { ProfilePage } from '@/pages/account/ProfilePage'
 import { useSession } from '@/mock/store'
-import { ComingSoon } from './ComingSoon'
+import { MOCK_DATA } from '@/mock/mode'
+import { ComingSoon, NotConnected } from './ComingSoon'
 import { NotFoundPage } from './ErrorPages'
 import type { PageDef } from './pageDef'
 import { ToastViewport } from '@/components/Toasts'
 import { useDensityEffect } from './useDensityEffect'
 
-const REGISTERED: PageDef[] = [
+/** Screens that already use the real platform API (everything else is backed by mock data for now). */
+const LIVE_PATHS = ['/profile', '/users', '/users/:userId']
+
+const ALL_PAGES: PageDef[] = [
   { path: '/', area: 'dashboard', element: <DashboardPage /> },
   { path: '/profile', area: 'dashboard', element: <ProfilePage /> },
   ...editorialPages, ...productionPages, ...publishingPages, ...financePages,
   ...communicationPages, ...websitePages, ...insightsPages, ...adminPages,
 ]
+// VITE_DEV_MODE=prod: screens without a backend show a "not connected" page, so no mock data appears.
+const REGISTERED: PageDef[] = MOCK_DATA
+  ? ALL_PAGES
+  : ALL_PAGES.map((p) => {
+      if (LIVE_PATHS.includes(p.path)) return p
+      const nav = ALL_NAV_ITEMS.find((n) => n.path === p.path)
+      return { ...p, element: <NotConnected item={nav ?? { label: 'This screen', description: '' }} /> }
+    })
 
 /** Signed-in area: waits for the session to be restored, sends everyone else to sign in, and holds back a forced password change. */
 function AuthGuard() {
