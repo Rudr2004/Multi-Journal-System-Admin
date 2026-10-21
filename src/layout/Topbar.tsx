@@ -4,6 +4,7 @@ import { resetAll } from '@/mock/reset'
 import { toast } from '@/components/Toasts'
 import { Link, useNavigate } from 'react-router-dom'
 import { useDataStore, useSession } from '@/mock/store'
+import { MOCK_DATA } from '@/mock/mode'
 import { nextDispatch } from '@/mock/data/papers'
 import { signOut } from '@/lib/api/session'
 import { useCurrentUser, usePermission, useRole, useRoles } from '@/permissions/hooks'
@@ -80,7 +81,7 @@ function HelpMenu() {
           <p className="px-2.5 py-1.5">Press <span className="kbd">{isMac ? '⌘' : 'Ctrl'} K</span> to search or jump anywhere.</p>
           <p className="px-2.5 py-1.5">Press <span className="kbd">/</span> to focus table search.</p>
           <p className="px-2.5 py-1.5 text-muted">Need help? support@edtechpublishers.in</p>
-          <button className="mt-1 flex w-full items-center gap-2 rounded-md border-t border-line px-2.5 py-2 text-left hover:bg-subtle" onClick={() => { resetAll(); close(); toast.success('Demo data reset to its starting state.') }}><RotateCcw size={15} strokeWidth={1.5} aria-hidden /> Reset demo data</button>
+          {MOCK_DATA && <button className="mt-1 flex w-full items-center gap-2 rounded-md border-t border-line px-2.5 py-2 text-left hover:bg-subtle" onClick={() => { resetAll(); close(); toast.success('Demo data reset to its starting state.') }}><RotateCcw size={15} strokeWidth={1.5} aria-hidden /> Reset demo data</button>}
         </div>
       )}
     </Popover>
@@ -157,8 +158,8 @@ export function Topbar() {
             <ShieldCheck size={14} aria-hidden /><span className="whitespace-nowrap"><span className="hidden md:inline">Double Blind Peer Review (Anonymous)</span><span className="md:hidden">Double blind</span></span>
           </span>
         )}
-        <DispatchIndicator />
-        <Notifications />
+        {MOCK_DATA && <DispatchIndicator />}
+        {MOCK_DATA && <Notifications />}
         <HelpMenu />
         <UserMenu />
       </div>

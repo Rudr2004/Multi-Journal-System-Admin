@@ -1,4 +1,6 @@
 import { applyMe, clearMe, useSession } from '@/mock/store'
+import { MOCK_DATA } from '@/mock/mode'
+import { endDemoSession, restoreDemoSession } from '@/mock/demoLogin'
 import { fetchMe, logoutAllRequest, logoutRequest } from './auth'
 import { isApiError } from './errors'
 import { clearAccessToken, refreshAccessToken, setAccessToken, setRolesChangedHandler, setSessionEndedHandler } from './http'
@@ -31,6 +33,8 @@ let restoring: Promise<void> | null = null
 /** On page load: the refresh cookie gives a new access token, then the person is read. Runs once per page load. */
 export function restoreSession(): Promise<void> {
   restoring ??= (async () => {
+    // VITE_DEV_MODE=local: a demo account chosen on the sign-in page stays signed in across reloads (no backend needed).
+    if (MOCK_DATA && restoreDemoSession()) return
     try {
       await refreshAccessToken()
       await reloadMe()
@@ -43,6 +47,7 @@ export function restoreSession(): Promise<void> {
 }
 
 async function end(request: () => Promise<void>) {
+  endDemoSession()
   try { await request() } catch { /* the cookie may already be gone; the local session ends either way */ }
   clearAccessToken()
   clearMe()

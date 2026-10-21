@@ -6,6 +6,7 @@ import { SECTIONS, menuFor } from '@/navigation/nav'
 import { levelForRoles } from '@/permissions/matrix'
 import { useJournals, useRole, useRoles } from '@/permissions/hooks'
 import { useDataStore, useSession } from '@/mock/store'
+import { MOCK_DATA } from '@/mock/mode'
 import { doiFor } from '@/shared/paperId'
 import { STATUS_META } from '@/shared/statuses'
 import { JournalBadge } from '@/components/Badges'
@@ -23,8 +24,9 @@ export function CommandPalette() {
   const roles = useRoles()
   const journals = useJournals()
   const scope = useSession((s) => s.journal)
-  const papers = useDataStore((s) => s.papers)
-  const tickets = useDataStore((s) => s.tickets)
+  // VITE_DEV_MODE=prod: the search never lists mock papers or tickets.
+  const papers = useDataStore((s) => (MOCK_DATA ? s.papers : []))
+  const tickets = useDataStore((s) => (MOCK_DATA ? s.tickets : []))
 
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
